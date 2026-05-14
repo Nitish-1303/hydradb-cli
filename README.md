@@ -41,7 +41,27 @@ The CLI installs three runtime dependencies automatically: `typer`, `httpx`, and
 
 ## Installation
 
-### From PyPI (recommended)
+### Using curl
+
+```bash
+curl -fsSL https://cli.hydradb.com/install | bash
+```
+
+This installs the published `hydradb-cli` package from PyPI. The installer uses `pipx` when available, because it keeps CLI tools isolated. If `pipx` is not installed, it falls back to `pip install --user`.
+
+Install a specific version:
+
+```bash
+HYDRADB_CLI_VERSION=0.1.0 curl -fsSL https://cli.hydradb.com/install | bash
+```
+
+Force reinstall:
+
+```bash
+HYDRADB_CLI_FORCE=1 curl -fsSL https://cli.hydradb.com/install | bash
+```
+
+### From PyPI
 
 ```bash
 pip install hydradb-cli
