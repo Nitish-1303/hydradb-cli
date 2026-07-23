@@ -91,12 +91,17 @@ def ingest(
 ) -> None:
     """Ingest a memory, knowledge text, or knowledge file(s)."""
     if files:
-        # Files are always knowledge sources. Reject combinations that would be
-        # silently ignored rather than storing them the wrong way.
+        # Files are always knowledge sources. Reject every option that would be
+        # silently ignored rather than storing the file the wrong way. Only
+        # --upsert applies to file ingest.
         if kind == "memory":
             print_error("File arguments are knowledge sources; --kind memory cannot be combined with files.")
         if text or title or source_id or user_name:
             print_error("--text/--title/--source-id/--user-name do not apply to file ingest; pass files only.")
+        if markdown:
+            print_error("--markdown does not apply to file ingest; pass files only.")
+        if not infer:
+            print_error("--infer/--no-infer does not apply to file ingest; pass files only.")
         _impl.do_ingest_knowledge_files(files, upsert=upsert, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
         return
     if kind == "knowledge":

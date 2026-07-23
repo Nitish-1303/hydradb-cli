@@ -186,6 +186,22 @@ class TestIngest:
             result = runner.invoke(app, ["ingest", str(f), "--text", "x"])
         assert result.exit_code != 0
 
+    def test_ingest_files_with_markdown_fails(self, tmp_path):
+        _auth()
+        f = tmp_path / "a.txt"
+        f.write_text("aaa")
+        with _patch_wrapper(_wrapper()):
+            result = runner.invoke(app, ["ingest", str(f), "--markdown"])
+        assert result.exit_code != 0
+
+    def test_ingest_files_with_no_infer_fails(self, tmp_path):
+        _auth()
+        f = tmp_path / "a.txt"
+        f.write_text("aaa")
+        with _patch_wrapper(_wrapper()):
+            result = runner.invoke(app, ["ingest", str(f), "--no-infer"])
+        assert result.exit_code != 0
+
 
 class TestListInspectDeleteRelationsVerify:
     def test_list(self):
