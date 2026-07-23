@@ -19,6 +19,20 @@ from hydradb_cli.hydra import HydraDB, HydraDBClientError
 from hydradb_cli.hydra.client import _bool_str, _is_envelope, _unwrap
 
 
+def _multipart_fields(request: httpx.Request) -> dict:
+    """Parse a multipart request body into {field name: text value}."""
+    content_type = request.headers.get("content-type", "")
+    boundary = content_type.split("boundary=", 1)[1].encode()
+    fields = {}
+    for part in request.content.split(b"--" + boundary):
+        if b'name="' not in part or b"\r\n\r\n" not in part:
+            continue
+        name = part.split(b'name="', 1)[1].split(b'"', 1)[0].decode()
+        value = part.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n", 1)[0]
+        fields[name] = value.decode(errors="replace")
+    return fields
+
+
 class _FakeEnvelope:
     def __init__(self, data):
         self.data = data
@@ -87,16 +101,34 @@ class TestIngest:
         assert b"dark mode" in request.content
         assert b'name="app_knowledge"' not in request.content
 
-    def test_ingest_knowledge_text_becomes_document(self):
+    def test_ingest_knowledge_text_uses_app_knowledge(self):
         captured = {}
         w = _wrapper_with_response({"success": True, "data": {}, "meta": {}}, captured=captured)
         w.context.ingest(kind="knowledge", text="report", title="Q3")
         request = captured["request"]
         assert request.headers["content-type"].startswith("multipart/form-data")
-        assert b'name="documents"' in request.content
+        # Text knowledge goes through app_knowledge (preserves a client id),
+        # never the v1 app_sources field or a raw documents upload.
+        assert b'name="app_knowledge"' in request.content
         assert b'name="type"' in request.content
         assert b"knowledge" in request.content
-        assert b'name="app_knowledge"' not in request.content
+        assert b'name="app_sources"' not in request.content
+        assert b'name="documents"' not in request.content
+
+    def test_ingest_knowledge_text_preserves_source_id_for_delete(self):
+        """`--source-id foo` must survive ingest (app_knowledge `id`) so a later
+        delete-by-id addresses the same source."""
+        cap_ingest = {}
+        w = _wrapper_with_response({"success": True, "data": {}, "meta": {}}, captured=cap_ingest)
+        w.context.ingest(kind="knowledge", text="report", source_id="foo")
+        fields = _multipart_fields(cap_ingest["request"])
+        item = json.loads(fields["app_knowledge"])[0]
+        assert item["id"] == "foo"
+
+        cap_delete = {}
+        w2 = _wrapper_with_response({"success": True, "data": {"deleted_count": 1}, "meta": {}}, captured=cap_delete)
+        w2.context.delete(ids=["foo"], kind="knowledge")
+        assert json.loads(cap_delete["request"].content)["ids"] == ["foo"]
 
     def test_ingest_many_merges_results(self):
         # Each file gets one call; results and counts are merged.

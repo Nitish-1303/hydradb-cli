@@ -78,7 +78,7 @@ def query(
 
 def ingest(
     files: list[str] | None = typer.Argument(None, help="Knowledge file path(s) to ingest."),
-    kind: str = typer.Option("memory", "--kind", help="Kind to ingest: 'memory' or 'knowledge'."),
+    kind: str | None = typer.Option(None, "--kind", help="Kind to ingest: 'memory' (default) or 'knowledge'."),
     text: str | None = typer.Option(None, "--text", "-t", help="Text to ingest. Use '-' to read from stdin."),
     title: str | None = typer.Option(None, "--title", help="Optional title."),
     source_id: str | None = typer.Option(None, "--source-id", help="Source identifier."),
@@ -91,6 +91,12 @@ def ingest(
 ) -> None:
     """Ingest a memory, knowledge text, or knowledge file(s)."""
     if files:
+        # Files are always knowledge sources. Reject combinations that would be
+        # silently ignored rather than storing them the wrong way.
+        if kind == "memory":
+            print_error("File arguments are knowledge sources; --kind memory cannot be combined with files.")
+        if text or title or source_id or user_name:
+            print_error("--text/--title/--source-id/--user-name do not apply to file ingest; pass files only.")
         _impl.do_ingest_knowledge_files(files, upsert=upsert, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
         return
     if kind == "knowledge":

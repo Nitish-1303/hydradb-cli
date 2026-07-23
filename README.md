@@ -120,9 +120,8 @@ export HYDRADB_API_KEY=your_api_key
 export HYDRADB_DATABASE=your_database
 ```
 
-> The older `HYDRA_DB_*` names (and `HYDRADB_TENANT_ID` / `HYDRADB_SUB_TENANT_ID`)
-> still work as deprecated aliases and print a one-line warning naming the
-> canonical `HYDRADB_*` replacement.
+> The CLI's older `HYDRA_DB_*` names still work as deprecated aliases and print a
+> one-line warning naming the canonical `HYDRADB_*` replacement.
 
 Environment variables take precedence over the config file when both are set.
 
@@ -163,7 +162,7 @@ hydradb config show
 hydradb config set <key> <value>
 ```
 
-Valid keys: `api_key`, `tenant_id`, `sub_tenant_id`, `base_url`.
+Valid keys: `api_key`, `database`, `collection`, `base_url` (the old `tenant_id` / `sub_tenant_id` keys still work as deprecated aliases).
 
 ---
 
@@ -342,11 +341,11 @@ View and update CLI configuration values without editing the config file manuall
 | Command | What it does |
 |---------|--------------|
 | `config show` | Displays all current settings (API key is masked). |
-| `config set <key> <value>` | Sets a single configuration value. Valid keys: `api_key`, `tenant_id`, `sub_tenant_id`, `base_url`. |
+| `config set <key> <value>` | Sets a single configuration value. Valid keys: `api_key`, `database`, `collection`, `base_url` (the old `tenant_id` / `sub_tenant_id` keys still work as deprecated aliases). |
 
 ```bash
 hydradb config show
-hydradb config set tenant_id my-tenant
+hydradb config set database my-database
 hydradb config set base_url https://api.hydradb.com
 ```
 
@@ -354,15 +353,17 @@ hydradb config set base_url https://api.hydradb.com
 
 ## Environment Variables
 
-| Variable | Purpose | Deprecated aliases (still read, warn once) |
-|----------|---------|--------------------------------------------|
-| `HYDRADB_API_KEY` | API key (overrides config file) | `HYDRA_DB_API_KEY`, `HYDRA_OPENCLAW_API_KEY` |
-| `HYDRADB_DATABASE` | Default database (overrides config file) | `HYDRADB_TENANT_ID`, `HYDRA_DB_TENANT_ID`, `HYDRA_OPENCLAW_TENANT_ID` |
-| `HYDRADB_COLLECTION` | Default collection (overrides config file) | `HYDRADB_SUB_TENANT_ID`, `HYDRA_DB_SUB_TENANT_ID` |
-| `HYDRADB_BASE_URL` | API base URL (default `https://api.hydradb.com`) | `HYDRA_DB_BASE_URL`, `HYDRADB_API_URL` |
+| Variable | Purpose | Deprecated alias (still read, warns once) |
+|----------|---------|-------------------------------------------|
+| `HYDRADB_API_KEY` | API key (overrides config file) | `HYDRA_DB_API_KEY` |
+| `HYDRADB_DATABASE` | Default database (overrides config file) | `HYDRA_DB_TENANT_ID` |
+| `HYDRADB_COLLECTION` | Default collection (overrides config file) | `HYDRA_DB_SUB_TENANT_ID` |
+| `HYDRADB_BASE_URL` | API base URL (default `https://api.hydradb.com`) | `HYDRA_DB_BASE_URL` |
 | `HYDRADB_OUTPUT` | Default output format — `human` or `json` | — |
 
-The canonical `HYDRADB_*` name wins when both it and a deprecated alias are set.
+The canonical `HYDRADB_*` name wins when both it and its deprecated alias are
+set. The CLI aliases only its own historical `HYDRA_DB_*` prefix — it does not
+read other clients' env prefixes.
 
 ---
 

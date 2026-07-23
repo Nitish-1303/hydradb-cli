@@ -99,6 +99,10 @@ def test_wrapper_emits_canonical_call(vector, wrapper, recorder):
         assert not recorder.content_type.startswith(sdk["forbid_content_type"])
     if sdk.get("forbid_field"):
         assert sdk["forbid_field"] not in fields, f"{vector['id']}: forbidden field {sdk['forbid_field']} present"
+    if sdk.get("source_field_in"):
+        assert any(f in fields for f in sdk["source_field_in"]), (
+            f"{vector['id']}: none of {sdk['source_field_in']} present in {sorted(fields)}"
+        )
 
     # (b) required fields + scope
     for key, value in sdk.get("args_include", {}).items():

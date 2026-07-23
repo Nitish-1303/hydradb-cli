@@ -170,6 +170,22 @@ class TestIngest:
             result = runner.invoke(app, ["ingest", "--text", "   "])
         assert result.exit_code != 0
 
+    def test_ingest_files_with_kind_memory_fails(self, tmp_path):
+        _auth()
+        f = tmp_path / "a.txt"
+        f.write_text("aaa")
+        with _patch_wrapper(_wrapper()):
+            result = runner.invoke(app, ["ingest", str(f), "--kind", "memory"])
+        assert result.exit_code != 0
+
+    def test_ingest_files_with_text_fails(self, tmp_path):
+        _auth()
+        f = tmp_path / "a.txt"
+        f.write_text("aaa")
+        with _patch_wrapper(_wrapper()):
+            result = runner.invoke(app, ["ingest", str(f), "--text", "x"])
+        assert result.exit_code != 0
+
 
 class TestListInspectDeleteRelationsVerify:
     def test_list(self):
@@ -207,6 +223,23 @@ class TestListInspectDeleteRelationsVerify:
             result = runner.invoke(app, ["delete", "src_9", "--kind", "knowledge", "--yes"])
         assert result.exit_code == 0
         assert w.context.delete.call_args.kwargs["kind"] == "knowledge"
+
+    def test_delete_no_match_fails(self):
+        _auth()
+        # v2 returns 200 with success:false when nothing matched — must not be
+        # reported as success or exit 0.
+        w = _wrapper(**{"context.delete": {"success": False, "deleted_count": 0}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["delete", "ghost", "--kind", "knowledge", "--yes"])
+        assert result.exit_code != 0
+
+    def test_delete_no_match_json_reports_failure(self):
+        _auth()
+        w = _wrapper(**{"context.delete": {"success": False, "deleted_count": 0}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["--output", "json", "delete", "ghost", "--kind", "knowledge", "--yes"])
+        assert result.exit_code != 0
+        assert json.loads(result.output)["success"] is False
 
     def test_relations(self):
         _auth()
@@ -441,6 +474,15 @@ class TestDeprecatedAliases:
         assert result.exit_code == 0
         assert "Report" in result.output
 
+    def test_fetch_sources_legacy_kind_memories(self):
+        _auth()
+        # The deprecated `--kind memories` must still work (maps to canonical `memory`).
+        w = _wrapper(**{"context.list": {"sources": [{"id": "m1", "content": "hi"}]}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["fetch", "sources", "--kind", "memories"])
+        assert result.exit_code == 0
+        assert w.context.list.call_args.kwargs["kind"] == "memory"
+
     def test_fetch_relations(self):
         _auth()
         w = _wrapper(**{"context.relations": {"relations": []}})
@@ -503,6 +545,12 @@ class TestAuthAndConfig:
         assert result.exit_code == 0
         result2 = runner.invoke(app, ["config", "show"])
         assert "my-t" in result2.output
+
+    def test_config_set_canonical_database_key(self):
+        result = runner.invoke(app, ["config", "set", "database", "canon-db"])
+        assert result.exit_code == 0
+        result2 = runner.invoke(app, ["config", "show"])
+        assert "canon-db" in result2.output
 
     def test_config_set_invalid_key(self):
         result = runner.invoke(app, ["config", "set", "bogus", "v"])

@@ -26,11 +26,14 @@ ENV_TENANT_ID = ENV_DATABASE
 ENV_SUB_TENANT_ID = ENV_COLLECTION
 
 # Deprecated env aliases still read (each warns once, naming the canonical name).
+# A client aliases ONLY the legacy prefix it historically used — for the CLI that
+# is `HYDRA_DB_*`. Other clients' prefixes (e.g. `HYDRA_OPENCLAW_*`, the plugin's
+# bare `HYDRADB_TENANT_ID`) are intentionally NOT read here (CONTRACT §1).
 _DEPRECATED_ENV_ALIASES: dict[str, list[str]] = {
-    ENV_API_KEY: ["HYDRA_DB_API_KEY", "HYDRA_OPENCLAW_API_KEY"],
-    ENV_DATABASE: ["HYDRADB_TENANT_ID", "HYDRA_DB_TENANT_ID", "HYDRA_OPENCLAW_TENANT_ID"],
-    ENV_COLLECTION: ["HYDRADB_SUB_TENANT_ID", "HYDRA_DB_SUB_TENANT_ID"],
-    ENV_BASE_URL: ["HYDRA_DB_BASE_URL", "HYDRADB_API_URL"],
+    ENV_API_KEY: ["HYDRA_DB_API_KEY"],
+    ENV_DATABASE: ["HYDRA_DB_TENANT_ID"],
+    ENV_COLLECTION: ["HYDRA_DB_SUB_TENANT_ID"],
+    ENV_BASE_URL: ["HYDRA_DB_BASE_URL"],
 }
 
 DEFAULT_BASE_URL = "https://api.hydradb.com"
@@ -90,13 +93,19 @@ def get_api_key() -> str | None:
 
 
 def get_database() -> str | None:
-    """Get default database (canonical name for the tenant scope)."""
-    return _env(ENV_DATABASE) or _read_config_file().get("tenant_id")
+    """Get default database (canonical name for the tenant scope).
+
+    Reads the canonical config-file key ``database`` first, then the deprecated
+    ``tenant_id`` key for back-compat with existing config files.
+    """
+    file_cfg = _read_config_file()
+    return _env(ENV_DATABASE) or file_cfg.get("database") or file_cfg.get("tenant_id")
 
 
 def get_collection() -> str | None:
     """Get default collection (canonical name for the sub-tenant scope)."""
-    return _env(ENV_COLLECTION) or _read_config_file().get("sub_tenant_id")
+    file_cfg = _read_config_file()
+    return _env(ENV_COLLECTION) or file_cfg.get("collection") or file_cfg.get("sub_tenant_id")
 
 
 # Historical names kept as thin aliases so existing call sites keep working.
@@ -123,11 +132,21 @@ def save_config(
     tenant_id: str | None = None,
     sub_tenant_id: str | None = None,
     base_url: str | None = None,
+    database: str | None = None,
+    collection: str | None = None,
 ) -> None:
-    """Save configuration values to config file."""
+    """Save configuration values to config file.
+
+    ``database``/``collection`` are the canonical keys; ``tenant_id``/
+    ``sub_tenant_id`` are still accepted and written for back-compat.
+    """
     data = _read_config_file()
     if api_key is not None:
         data["api_key"] = api_key
+    if database is not None:
+        data["database"] = database
+    if collection is not None:
+        data["collection"] = collection
     if tenant_id is not None:
         data["tenant_id"] = tenant_id
     if sub_tenant_id is not None:
@@ -153,5 +172,7 @@ def get_full_config() -> dict:
         "base_url": get_base_url(),
         "config_file": str(CONFIG_FILE),
         "api_key_source": "env" if _env(ENV_API_KEY) else ("file" if file_cfg.get("api_key") else "none"),
-        "tenant_id_source": "env" if _env(ENV_DATABASE) else ("file" if file_cfg.get("tenant_id") else "none"),
+        "tenant_id_source": "env"
+        if _env(ENV_DATABASE)
+        else ("file" if (file_cfg.get("database") or file_cfg.get("tenant_id")) else "none"),
     }

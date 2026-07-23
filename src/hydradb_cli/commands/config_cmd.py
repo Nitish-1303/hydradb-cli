@@ -4,12 +4,23 @@ import typer
 from rich.panel import Panel
 
 from hydradb_cli.config import get_full_config, save_config
-from hydradb_cli.output import console, get_output_format, make_kv_table, print_error, print_json, print_result
+from hydradb_cli.output import (
+    console,
+    get_output_format,
+    make_kv_table,
+    print_error,
+    print_json,
+    print_result,
+    warn_deprecated,
+)
 from hydradb_cli.utils.common import mask_api_key
 
 app = typer.Typer(help="View and manage CLI configuration.")
 
-VALID_KEYS = {"api_key", "tenant_id", "sub_tenant_id", "base_url"}
+# Canonical keys plus deprecated aliases (old vocabulary) still accepted.
+CANONICAL_KEYS = {"api_key", "database", "collection", "base_url"}
+_DEPRECATED_KEY_ALIASES = {"tenant_id": "database", "sub_tenant_id": "collection"}
+VALID_KEYS = CANONICAL_KEYS | set(_DEPRECATED_KEY_ALIASES)
 
 
 @app.command()
@@ -77,12 +88,15 @@ def set_value(
 
     Examples:
 
-        hydradb config set tenant_id my-tenant
+        hydradb config set database my-database
 
         hydradb config set base_url https://api.hydradb.com
     """
     if key not in VALID_KEYS:
         print_error(f"Unknown config key '{key}'. Valid keys: {', '.join(sorted(VALID_KEYS))}")
+
+    if key in _DEPRECATED_KEY_ALIASES:
+        warn_deprecated(f"config key '{key}'", _DEPRECATED_KEY_ALIASES[key])
 
     if key == "api_key" and not value.strip():
         print_error("API key cannot be empty. Use 'hydradb logout' to remove credentials.")

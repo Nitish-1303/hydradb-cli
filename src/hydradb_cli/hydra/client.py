@@ -181,13 +181,23 @@ class _Context(_Resource):
         database: str | None = None,
         collection: str | None = None,
     ) -> dict:
-        """Ingest one memory (from ``text``) or one knowledge source (from ``text``
-        or a ``documents`` file) as a single multipart ``context/ingest`` call.
+        """Ingest one memory (``memories``), one text/structured knowledge item
+        (``app_knowledge``), or one knowledge file (``documents``) as a single
+        multipart ``context/ingest`` call.
+
+        Field choice matters (v2 handler, per the PRO-1298 ruling): only
+        ``app_knowledge`` preserves a client-assigned ``id`` verbatim as the
+        source_id — a ``documents`` upload always gets a server-minted uuid. So
+        text/structured knowledge goes through ``app_knowledge`` (keeping
+        ``--source-id`` addressable for later delete/verify), and ``documents``
+        is reserved for actual FILE uploads where no client id is supplied.
+        There is no ``app_sources`` on the SDK path (that was the v1 field).
 
         Multi-file ingest is a caller-side loop over this method (see
         ``ingest_many``); the SDK's ``documents`` takes exactly one file.
         """
         memories: str | None = None
+        app_knowledge: str | None = None
         if kind == "memory":
             memory: dict[str, Any] = {
                 "text": text,
@@ -202,16 +212,12 @@ class _Context(_Resource):
                 memory["user_name"] = user_name
             memories = json.dumps([memory])
         elif kind == "knowledge" and documents is None and text is not None:
-            # Text knowledge is sent as an inline document (v2 has no app_sources).
-            filename = f"{source_id or title or 'text'}.txt"
-            documents = (filename, text.encode("utf-8"), "text/plain")
-            if document_metadata is None and (title or source_id):
-                meta: dict[str, Any] = {}
-                if title:
-                    meta["title"] = title
-                if source_id:
-                    meta["id"] = source_id
-                document_metadata = json.dumps(meta)
+            # Text/structured knowledge -> app_knowledge so a client-supplied id
+            # survives verbatim as the source_id (empty id -> server mints one).
+            item: dict[str, Any] = {"id": source_id or "", "content": {"text": text}}
+            if title:
+                item["title"] = title
+            app_knowledge = json.dumps([item])
 
         resp = self._invoke(
             self._w._sdk.context.ingest,
@@ -219,6 +225,7 @@ class _Context(_Resource):
             collection=self._w._resolve_collection(collection),
             type=kind,
             memories=memories,
+            app_knowledge=app_knowledge,
             documents=documents,
             document_metadata=document_metadata,
             upsert=_bool_str(upsert),

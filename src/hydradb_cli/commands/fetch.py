@@ -27,13 +27,16 @@ def content(
 def sources(
     tenant_id: str | None = typer.Option(None, "--tenant-id", help="Database. Uses default if not specified."),
     sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Collection."),
-    kind: str | None = typer.Option(None, "--kind", help="Filter by kind: 'knowledge' or 'memory'."),
+    kind: str | None = typer.Option(None, "--kind", help="Filter by kind: 'knowledge' or 'memories'."),
     page: int | None = typer.Option(None, "--page", help="Page number (1-indexed)."),
     page_size: int | None = typer.Option(None, "--page-size", help="Items per page (1-100)."),
 ) -> None:
     """[dim](deprecated)[/dim] List ingested sources — use 'hydradb list'."""
     warn_deprecated("fetch sources", "list")
-    _impl.do_list(kind=kind, page=page, page_size=page_size, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
+    # Preserve this deprecated command's historical vocabulary: it accepted
+    # `--kind memories`, which the canonical `list` spells `memory`.
+    canonical_kind = {"memories": "memory", "sources": "knowledge"}.get(kind, kind)
+    _impl.do_list(kind=canonical_kind, page=page, page_size=page_size, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
 
 
 @app.command()

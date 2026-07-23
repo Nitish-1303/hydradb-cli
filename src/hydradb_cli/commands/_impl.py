@@ -483,16 +483,17 @@ def do_delete(
         lambda: wrapper.context.delete(ids=clean_ids, kind=kind, database=tid, collection=stid),
     )
 
-    def fmt(r: dict) -> str:
-        noun = "memory" if kind == "memory" else "knowledge source(s)"
-        deleted = r.get("user_memory_deleted") or r.get("deleted_count")
-        if r.get("success") is False:
-            return f"[red]✗[/red] Could not confirm deletion of {noun}."
-        if kind == "memory" and not deleted:
-            return f"[yellow]![/yellow] {', '.join(clean_ids)} was not found or already deleted."
-        return f"[green]✓[/green] Deleted {len(clean_ids)} {noun} from database [bold]{tid}[/bold]."
+    noun = "memory" if kind == "memory" else "knowledge source(s)"
+    # v2 returns HTTP 200 with {success:false, deleted_count:0} when nothing
+    # matched — that is a no-op, not a success. Surface it as an error (non-zero
+    # exit, and `{"success":false,"error":…}` in json mode) rather than claiming
+    # a deletion that never happened.
+    if result.get("success") is False:
+        print_error(f"Nothing deleted: no matching {noun} for {', '.join(clean_ids)}.")
 
-    print_result(result, fmt)
+    print_result(
+        result, lambda r: f"[green]✓[/green] Deleted {len(clean_ids)} {noun} from database [bold]{tid}[/bold]."
+    )
 
 
 # ── relations ────────────────────────────────────────────────────────────────
