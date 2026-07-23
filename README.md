@@ -116,9 +116,13 @@ hydradb login --api-key YOUR_API_KEY --tenant-id YOUR_TENANT_ID \
 ### Option B — Environment variables (session-only)
 
 ```bash
-export HYDRA_DB_API_KEY=your_api_key
-export HYDRA_DB_TENANT_ID=your_tenant_id
+export HYDRADB_API_KEY=your_api_key
+export HYDRADB_DATABASE=your_database
 ```
+
+> The older `HYDRA_DB_*` names (and `HYDRADB_TENANT_ID` / `HYDRADB_SUB_TENANT_ID`)
+> still work as deprecated aliases and print a one-line warning naming the
+> canonical `HYDRADB_*` replacement.
 
 Environment variables take precedence over the config file when both are set.
 
@@ -177,9 +181,35 @@ These flags go **before** the subcommand:
 Every command supports JSON output, which is useful for scripting and piping:
 
 ```bash
-hydradb -o json memories list
-hydradb -o json recall full "pricing" | jq '.chunks[0].chunk_content'
+hydradb -o json list --kind memory
+hydradb -o json query "pricing" --kind knowledge | jq '.chunks[0].chunk_content'
 ```
+
+The `--output json` shape is a stable, documented contract — the wrapper unwraps
+the SDK response envelope back to the same plain-dict shape, so `jq` pipelines
+keep working across SDK updates.
+
+---
+
+### Canonical commands
+
+The CLI speaks the shared HydraDB vocabulary. These are the names to use:
+
+| Command | What it does |
+|---------|--------------|
+| `hydradb query <query>` | Retrieve knowledge or memories (`--kind memory\|knowledge`, `--operator`, `--mode`, …) |
+| `hydradb ingest` | Store a memory, knowledge text, or knowledge file(s) (`--kind`, `--text`, `<files>`) |
+| `hydradb list` | List ingested sources and memories (`--kind`, `--page`) |
+| `hydradb inspect <id>` | Fetch a source's content (`--mode`) |
+| `hydradb delete <ids...>` | Delete memories or knowledge sources (`--kind`) |
+| `hydradb relations <id>` | Explore knowledge-graph relations |
+| `hydradb verify <ids...>` | Check per-source ingestion status |
+| `hydradb database …` | Manage databases: `create`, `delete`, `list`, `collections`, `stats`, `readiness`, `monitor` |
+| `hydradb doctor` | Check config and API reachability |
+
+Every legacy command below (`tenant`, `memories`, `knowledge`, `recall`,
+`fetch`, `whoami`) still works as a **deprecated alias** and prints a one-line
+stderr warning naming its replacement.
 
 ---
 
@@ -197,7 +227,9 @@ Manage your CLI session credentials.
 
 ### tenant
 
-Create, monitor, and manage HydraDB tenants.
+> **Deprecated alias** of `hydradb database`. Still works; prints a warning.
+
+Create, monitor, and manage HydraDB databases (formerly "tenants").
 
 | Command | What it does | Key options |
 |---------|--------------|-------------|
@@ -216,6 +248,8 @@ hydradb tenant delete old-tenant --yes
 ---
 
 ### memories
+
+> **Deprecated alias** of `hydradb ingest` / `list` / `delete`. Still works; prints a warning.
 
 Store and manage user-level memories (preferences, notes, context).
 
@@ -236,6 +270,8 @@ hydradb memories delete mem_abc123 --yes
 ---
 
 ### knowledge
+
+> **Deprecated alias** of `hydradb ingest` / `verify` / `delete`. Still works; prints a warning.
 
 Upload, verify, and delete knowledge sources (files or raw text).
 
@@ -258,6 +294,8 @@ hydradb knowledge delete source_abc123 source_def456 --yes
 
 ### recall
 
+> **Deprecated alias** of `hydradb query`. Still works; prints a warning.
+
 Search and retrieve information from your knowledge base or user memories.
 
 | Command | What it does | Key options |
@@ -276,6 +314,8 @@ hydradb recall keyword "pricing AND enterprise" --operator and
 ---
 
 ### fetch
+
+> **Deprecated alias** of `hydradb inspect` / `list` / `relations`. Still works; prints a warning.
 
 Inspect ingested sources, retrieve content, and explore knowledge graph relationships.
 
@@ -314,13 +354,15 @@ hydradb config set base_url https://api.hydradb.com
 
 ## Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `HYDRA_DB_API_KEY` | API key (overrides config file) |
-| `HYDRA_DB_TENANT_ID` | Default tenant ID (overrides config file) |
-| `HYDRA_DB_SUB_TENANT_ID` | Default sub-tenant ID (overrides config file) |
-| `HYDRA_DB_BASE_URL` | API base URL (overrides config file, default `https://api.hydradb.com`) |
-| `HYDRADB_OUTPUT` | Default output format — `human` or `json` |
+| Variable | Purpose | Deprecated aliases (still read, warn once) |
+|----------|---------|--------------------------------------------|
+| `HYDRADB_API_KEY` | API key (overrides config file) | `HYDRA_DB_API_KEY`, `HYDRA_OPENCLAW_API_KEY` |
+| `HYDRADB_DATABASE` | Default database (overrides config file) | `HYDRADB_TENANT_ID`, `HYDRA_DB_TENANT_ID`, `HYDRA_OPENCLAW_TENANT_ID` |
+| `HYDRADB_COLLECTION` | Default collection (overrides config file) | `HYDRADB_SUB_TENANT_ID`, `HYDRA_DB_SUB_TENANT_ID` |
+| `HYDRADB_BASE_URL` | API base URL (default `https://api.hydradb.com`) | `HYDRA_DB_BASE_URL`, `HYDRADB_API_URL` |
+| `HYDRADB_OUTPUT` | Default output format — `human` or `json` | — |
+
+The canonical `HYDRADB_*` name wins when both it and a deprecated alias are set.
 
 ---
 

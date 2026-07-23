@@ -5,12 +5,12 @@ import sys
 import typer
 from rich.panel import Panel
 
-from hydradb_cli.client import HydraDBClient, HydraDBClientError
 from hydradb_cli.config import (
     clear_config,
     get_full_config,
     save_config,
 )
+from hydradb_cli.hydra import HydraDBClientError
 from hydradb_cli.output import (
     console,
     get_output_format,
@@ -19,30 +19,17 @@ from hydradb_cli.output import (
     print_json,
     print_result,
     spinner,
+    warn_deprecated,
 )
-from hydradb_cli.utils.common import mask_api_key
+from hydradb_cli.utils.common import build_wrapper, mask_api_key
 
 
 def login(
-    api_key: str | None = typer.Option(
-        None,
-        "--api-key",
-        help="Your HydraDB API key (Bearer token).",
-    ),
-    tenant_id: str | None = typer.Option(
-        None,
-        "--tenant-id",
-        help="Default tenant ID to use for all commands.",
-    ),
-    sub_tenant_id: str | None = typer.Option(
-        None,
-        "--sub-tenant-id",
-        help="Default sub-tenant ID.",
-    ),
+    api_key: str | None = typer.Option(None, "--api-key", help="Your HydraDB API key (Bearer token)."),
+    tenant_id: str | None = typer.Option(None, "--tenant-id", help="Default database to use for all commands."),
+    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Default collection."),
     base_url: str | None = typer.Option(
-        None,
-        "--base-url",
-        help="Custom API base URL (default: https://api.hydradb.com).",
+        None, "--base-url", help="Custom API base URL (default: https://api.hydradb.com)."
     ),
 ) -> None:
     """Authenticate with HydraDB and save credentials locally.
@@ -63,45 +50,44 @@ def login(
 
     validation_warning: str | None = None
 
-    with HydraDBClient(api_key=api_key, base_url=base_url) as client:
-        if tenant_id:
-            with spinner("Validating credentials..."):
-                try:
-                    client.monitor_tenant(tenant_id)
-                except HydraDBClientError as e:
-                    if e.status_code == 401:
-                        print_error("Invalid API key. Authentication failed.")
-                    elif e.status_code == 403:
-                        validation_warning = (
-                            "API key was rejected by the server (HTTP 403). "
-                            "It may be invalid or lack permission for this tenant. "
-                            "Credentials saved \u2014 verify with 'hydradb tenant monitor'."
-                        )
-                    elif e.status_code != 0:
-                        validation_warning = (
-                            f"Could not validate against tenant '{tenant_id}' "
-                            f"(HTTP {e.status_code}). Credentials saved \u2014 verify with 'hydradb whoami'."
-                        )
-                except Exception:
+    if tenant_id:
+        wrapper = build_wrapper(api_key=api_key, base_url=base_url, database=tenant_id)
+        with spinner("Validating credentials..."):
+            try:
+                wrapper.databases.readiness(database=tenant_id)
+            except HydraDBClientError as e:
+                if e.status_code == 401:
+                    print_error("Invalid API key. Authentication failed.")
+                elif e.status_code == 403:
+                    validation_warning = (
+                        "API key was rejected by the server (HTTP 403). "
+                        "It may be invalid or lack permission for this database. "
+                        "Credentials saved — verify with 'hydradb database monitor'."
+                    )
+                elif e.status_code != 0:
+                    validation_warning = (
+                        f"Could not validate against database '{tenant_id}' "
+                        f"(HTTP {e.status_code}). Credentials saved — verify with 'hydradb doctor'."
+                    )
+                else:
                     validation_warning = (
                         "Could not reach the API to validate credentials. "
-                        "Credentials saved \u2014 verify with 'hydradb whoami'."
+                        "Credentials saved — verify with 'hydradb doctor'."
                     )
+            except Exception:
+                validation_warning = (
+                    "Could not reach the API to validate credentials. Credentials saved — verify with 'hydradb doctor'."
+                )
 
-    save_config(
-        api_key=api_key,
-        tenant_id=tenant_id,
-        sub_tenant_id=sub_tenant_id,
-        base_url=base_url,
-    )
+    save_config(api_key=api_key, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id, base_url=base_url)
 
     def fmt(r: dict):
         lines = [
-            "[green]\u2713[/green] Logged in to HydraDB",
+            "[green]✓[/green] Logged in to HydraDB",
             "  [dim]Credentials saved to ~/.hydradb/config.json[/dim]",
         ]
         if tenant_id:
-            lines.append(f"  [cyan]Tenant:[/cyan] {tenant_id}")
+            lines.append(f"  [cyan]Database:[/cyan] {tenant_id}")
         if validation_warning:
             lines.append(f"\n  [yellow]![/yellow] {validation_warning}")
         return Panel(
@@ -125,19 +111,19 @@ def logout() -> None:
     clear_config()
     print_result(
         {"success": True, "message": "Logged out. Credentials removed."},
-        lambda r: "[green]\u2713[/green] Logged out. Credentials removed from ~/.hydradb/config.json",
+        lambda r: "[green]✓[/green] Logged out. Credentials removed from ~/.hydradb/config.json",
     )
 
 
 def whoami() -> None:
-    """Show current authentication status and configuration."""
+    """[dim](deprecated)[/dim] Show authentication status — use 'hydradb doctor'."""
+    warn_deprecated("whoami", "doctor")
     cfg = get_full_config()
 
     if get_output_format() == "json":
         safe_cfg = dict(cfg)
         if safe_cfg.get("api_key"):
-            key = safe_cfg["api_key"]
-            safe_cfg["api_key"] = mask_api_key(key)
+            safe_cfg["api_key"] = mask_api_key(safe_cfg["api_key"])
         print_json(safe_cfg)
         return
 
@@ -145,20 +131,19 @@ def whoami() -> None:
     pairs: list[tuple[str, str]] = []
 
     if api_key:
-        masked = mask_api_key(api_key)
-        pairs.append(("API Key", f"{masked} [dim]({cfg['api_key_source']})[/dim]"))
+        pairs.append(("API Key", f"{mask_api_key(api_key)} [dim]({cfg['api_key_source']})[/dim]"))
     else:
         pairs.append(("API Key", "[dim]Not configured[/dim]"))
 
     tenant_id = cfg.get("tenant_id")
     if tenant_id:
-        pairs.append(("Tenant ID", f"{tenant_id} [dim]({cfg['tenant_id_source']})[/dim]"))
+        pairs.append(("Database", f"{tenant_id} [dim]({cfg['tenant_id_source']})[/dim]"))
     else:
-        pairs.append(("Tenant ID", "[dim]Not configured[/dim]"))
+        pairs.append(("Database", "[dim]Not configured[/dim]"))
 
     sub_tenant = cfg.get("sub_tenant_id")
     if sub_tenant:
-        pairs.append(("Sub-Tenant ID", sub_tenant))
+        pairs.append(("Collection", sub_tenant))
 
     pairs.append(("Base URL", cfg["base_url"]))
     pairs.append(("Config File", cfg["config_file"]))

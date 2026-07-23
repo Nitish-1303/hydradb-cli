@@ -1,0 +1,11 @@
+{
+  "sources": [
+    {
+      "id": "s1",
+      "title": "Report",
+      "type": "knowledge"
+    }
+  ],
+  "success": true,
+  "total": 1
+}
