@@ -25,8 +25,23 @@ def clean_config(tmp_path, monkeypatch):
     config_file = config_dir / "config.json"
     monkeypatch.setattr("hydradb_cli.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("hydradb_cli.config.CONFIG_FILE", config_file)
-    # Clear env vars
-    for var in (ENV_API_KEY, ENV_TENANT_ID, ENV_SUB_TENANT_ID, ENV_BASE_URL):
+    # Clear canonical + deprecated-alias env vars so the developer's own shell
+    # (which exports HYDRADB_TENANT_ID etc.) never leaks into tests.
+    for var in (
+        ENV_API_KEY,
+        ENV_TENANT_ID,
+        ENV_SUB_TENANT_ID,
+        ENV_BASE_URL,
+        "HYDRADB_TENANT_ID",
+        "HYDRADB_SUB_TENANT_ID",
+        "HYDRADB_API_URL",
+        "HYDRA_DB_API_KEY",
+        "HYDRA_DB_TENANT_ID",
+        "HYDRA_DB_SUB_TENANT_ID",
+        "HYDRA_DB_BASE_URL",
+        "HYDRA_OPENCLAW_API_KEY",
+        "HYDRA_OPENCLAW_TENANT_ID",
+    ):
         monkeypatch.delenv(var, raising=False)
     yield config_file
 

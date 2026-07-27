@@ -4,8 +4,8 @@ import sys
 
 import httpx
 
-from hydradb_cli.client import HydraDBClient, HydraDBClientError
-from hydradb_cli.config import get_api_key, get_sub_tenant_id, get_tenant_id
+from hydradb_cli.config import get_api_key, get_base_url, get_collection, get_database
+from hydradb_cli.hydra import HydraDB, HydraDBClientError
 from hydradb_cli.output import print_error
 
 
@@ -20,27 +20,51 @@ def require_api_key() -> str:
     """Get the API key or exit with a helpful error."""
     key = get_api_key()
     if not key:
-        print_error("No API key configured. Run 'hydradb login' or set HYDRA_DB_API_KEY environment variable.")
+        print_error("No API key configured. Run 'hydradb login' or set HYDRADB_API_KEY environment variable.")
     return key  # type: ignore[return-value]
 
 
 def require_tenant_id(tenant_id: str | None = None) -> str:
-    """Get tenant ID from argument, config, or exit with error."""
-    tid = tenant_id or get_tenant_id()
+    """Get the database (tenant) scope from argument, config, or exit with error."""
+    tid = tenant_id or get_database()
     if not tid or not tid.strip():
-        print_error("No tenant ID specified. Use --tenant-id or run 'hydradb config set tenant_id <id>'.")
+        print_error("No database specified. Use --tenant-id or run 'hydradb config set tenant_id <id>'.")
     return tid  # type: ignore[return-value]
 
 
 def resolve_sub_tenant_id(sub_tenant_id: str | None = None) -> str | None:
-    """Get sub-tenant ID from argument or config (may be None)."""
-    return sub_tenant_id or get_sub_tenant_id()
+    """Get the collection (sub-tenant) scope from argument or config (may be None)."""
+    return sub_tenant_id or get_collection()
 
 
-def get_client() -> HydraDBClient:
-    """Create an authenticated HydraDB client or exit with error."""
+def build_wrapper(
+    api_key: str,
+    base_url: str | None = None,
+    database: str | None = None,
+    collection: str | None = None,
+) -> HydraDB:
+    """Construct the SDK wrapper from explicit values (used by ``login``)."""
+    return HydraDB(
+        token=api_key,
+        base_url=base_url or get_base_url(),
+        database=database,
+        collection=collection,
+    )
+
+
+def get_wrapper() -> HydraDB:
+    """Create an authenticated HydraDB wrapper or exit with error.
+
+    Default database/collection scope is pulled from config so commands can omit
+    ``--tenant-id``/``--sub-tenant-id`` when a default is configured.
+    """
     api_key = require_api_key()
-    return HydraDBClient(api_key=api_key)
+    return HydraDB(
+        token=api_key,
+        base_url=get_base_url(),
+        database=get_database(),
+        collection=get_collection(),
+    )
 
 
 def _extract_error_message(detail: str) -> str:
@@ -76,7 +100,8 @@ def handle_api_error(e: HydraDBClientError) -> None:
         msg = _extract_error_message(e.detail)
         if "tenant collection statistics" in msg.lower():
             print_error(
-                "Could not retrieve tenant stats. The tenant may not exist or the backend is temporarily unavailable."
+                "Could not retrieve database stats. The database may not exist or the backend is temporarily "
+                "unavailable."
             )
         elif "memory service" in msg.lower():
             print_error("Memory service is temporarily unavailable. Please try again.")

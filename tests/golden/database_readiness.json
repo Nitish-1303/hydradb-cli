@@ -1,0 +1,7 @@
+{
+  "database": "db_test",
+  "infra": {
+    "graph_status": true,
+    "ready_for_ingestion": true
+  }
+}

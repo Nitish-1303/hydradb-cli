@@ -1,0 +1,401 @@
+"""Thin, hand-owned wrapper over ``hydradb-sdk`` (import package ``hydra_db``).
+
+This is the firewall described in ``CONTRACT.md``: the SDK's method names are
+generated from OpenAPI summary text and can be renamed by a patch release, so
+every client wraps the SDK behind a hand-owned layer that exposes the *canonical*
+vocabulary (§1) and pins the SDK **exactly** (never a range).
+
+Responsibilities (CONTRACT §2):
+  * own the ``hydradb-sdk`` dependency and construct ``HydraDB(token, base_url)``
+  * unwrap ``HandlerEnvelope{data, success, meta}`` to plain dicts — but by
+    *checking* for the envelope shape, never assuming it
+  * translate SDK exceptions back into :class:`HydraDBClientError`
+  * apply default database/collection scope from config
+  * send ``API-Version: 2`` (the SDK does this by default)
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from typing import Any
+
+import httpx
+from hydra_db import HydraDB as _SdkHydraDB
+from hydra_db.core.api_error import ApiError
+from hydra_db.core.file import File
+from hydra_db.core.parse_error import ParsingError
+
+from hydradb_cli.hydra.errors import HydraDBClientError, translate_sdk_error
+
+
+def _is_envelope(obj: Any) -> bool:
+    """Whether ``obj`` looks like a ``HandlerEnvelope{data, success, meta}``.
+
+    We check for the shape rather than assuming it: some SDK methods return
+    bare payloads (e.g. ``databases.update_metadata_schema``) that must not be
+    unwrapped.
+    """
+    return hasattr(obj, "data") and hasattr(obj, "success") and hasattr(obj, "meta")
+
+
+def _dump(obj: Any) -> Any:
+    """Turn a pydantic model into a plain JSON-able dict; pass through the rest."""
+    model_dump = getattr(obj, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
+    return obj
+
+
+def _unwrap(obj: Any) -> Any:
+    """Return the plain-dict payload for an SDK response.
+
+    Enveloped responses collapse to their ``.data`` (an empty dict when data is
+    null); non-enveloped responses are dumped as-is.
+    """
+    if _is_envelope(obj):
+        data = _dump(obj.data)
+        return data if data is not None else {}
+    dumped = _dump(obj)
+    return dumped if dumped is not None else {}
+
+
+def _bool_str(value: bool | None) -> str | None:
+    """The SDK's multipart ``upsert`` field is a string; map bools to it."""
+    if value is None:
+        return None
+    return "true" if value else "false"
+
+
+class _Resource:
+    """Base for the ``databases``/``context`` sub-resources."""
+
+    def __init__(self, wrapper: HydraDB):
+        self._w = wrapper
+
+    def _invoke(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
+        """Call an SDK method, dropping ``None`` kwargs so the SDK's own OMIT
+        defaults apply, and translating any SDK/transport error."""
+        clean = {k: v for k, v in kwargs.items() if v is not None}
+        try:
+            return fn(**clean)
+        except (ApiError, ParsingError, httpx.HTTPError) as exc:
+            raise translate_sdk_error(exc) from exc
+
+
+class _Databases(_Resource):
+    """Database-scoped operations (was the ``tenant`` group)."""
+
+    def create(
+        self,
+        *,
+        database: str,
+        embeddings_dimension: int | None = None,
+        is_embeddings_tenant: bool | None = None,
+        database_metadata_schema: Any | None = None,
+    ) -> dict:
+        resp = self._invoke(
+            self._w._sdk.databases.create,
+            database=database,
+            embeddings_dimension=embeddings_dimension,
+            is_embeddings_tenant=is_embeddings_tenant,
+            database_metadata_schema=database_metadata_schema,
+        )
+        return _unwrap(resp)
+
+    def delete(self, *, database: str) -> dict:
+        resp = self._invoke(self._w._sdk.databases.delete, database=database)
+        return _unwrap(resp)
+
+    def list(self) -> dict:
+        resp = self._invoke(self._w._sdk.databases.list)
+        return _unwrap(resp)
+
+    def collections(self, *, database: str | None = None) -> dict:
+        resp = self._invoke(self._w._sdk.databases.collections, database=self._w._require_database(database))
+        return _unwrap(resp)
+
+    def stats(self, *, database: str | None = None) -> dict:
+        resp = self._invoke(self._w._sdk.databases.stats, database=self._w._require_database(database))
+        return _unwrap(resp)
+
+    def readiness(self, *, database: str | None = None) -> dict:
+        """Infrastructure provisioning status (CONTRACT: renamed away from ``status``)."""
+        resp = self._invoke(self._w._sdk.databases.status, database=self._w._require_database(database))
+        return _unwrap(resp)
+
+
+class _Context(_Resource):
+    """Context-family operations: query, ingest, list, inspect, delete, relations."""
+
+    def query(
+        self,
+        *,
+        query: str,
+        kind: str | None = None,
+        operator: str | None = None,
+        max_results: int | None = None,
+        mode: str | None = None,
+        alpha: float | None = None,
+        recency_bias: float | None = None,
+        graph_context: bool | None = None,
+        additional_context: str | None = None,
+        query_by: str | None = None,
+        database: str | None = None,
+        collection: str | None = None,
+    ) -> dict:
+        """The single retrieval entry point (absorbs recall full/preferences/keyword).
+
+        Maps to the SDK's top-level ``client.query``; ``kind`` becomes ``type``.
+        """
+        resp = self._invoke(
+            self._w._sdk.query,
+            type=kind,
+            query=query,
+            operator=operator,
+            max_results=max_results,
+            mode=mode,
+            alpha=alpha,
+            recency_bias=recency_bias,
+            graph_context=graph_context,
+            additional_context=additional_context,
+            query_by=query_by,
+            database=self._w._require_database(database),
+            collection=self._w._resolve_collection(collection),
+        )
+        return _unwrap(resp)
+
+    def ingest(
+        self,
+        *,
+        kind: str,
+        text: str | None = None,
+        documents: File | None = None,
+        title: str | None = None,
+        source_id: str | None = None,
+        user_name: str | None = None,
+        infer: bool | None = None,
+        is_markdown: bool | None = None,
+        upsert: bool | None = None,
+        document_metadata: str | None = None,
+        database: str | None = None,
+        collection: str | None = None,
+    ) -> dict:
+        """Ingest one memory (``memories``), one text/structured knowledge item
+        (``app_knowledge``), or one knowledge file (``documents``) as a single
+        multipart ``context/ingest`` call.
+
+        Field choice matters (v2 handler, per the PRO-1298 ruling): only
+        ``app_knowledge`` preserves a client-assigned ``id`` verbatim as the
+        source_id — a ``documents`` upload always gets a server-minted uuid. So
+        text/structured knowledge goes through ``app_knowledge`` (keeping
+        ``--source-id`` addressable for later delete/verify), and ``documents``
+        is reserved for actual FILE uploads where no client id is supplied.
+        There is no ``app_sources`` on the SDK path (that was the v1 field).
+
+        Multi-file ingest is a caller-side loop over this method (see
+        ``ingest_many``); the SDK's ``documents`` takes exactly one file.
+        """
+        memories: str | None = None
+        app_knowledge: str | None = None
+        if kind == "memory":
+            memory: dict[str, Any] = {
+                "text": text,
+                "infer": True if infer is None else bool(infer),
+                "is_markdown": bool(is_markdown),
+            }
+            if title:
+                memory["title"] = title
+            if source_id:
+                memory["source_id"] = source_id
+            if user_name:
+                memory["user_name"] = user_name
+            memories = json.dumps([memory])
+        elif kind == "knowledge" and documents is None and text is not None:
+            # Text/structured knowledge -> app_knowledge so a client-supplied id
+            # survives verbatim as the source_id (empty id -> server mints one).
+            item: dict[str, Any] = {"id": source_id or "", "content": {"text": text}}
+            if title:
+                item["title"] = title
+            app_knowledge = json.dumps([item])
+
+        resp = self._invoke(
+            self._w._sdk.context.ingest,
+            database=self._w._require_database(database),
+            collection=self._w._resolve_collection(collection),
+            type=kind,
+            memories=memories,
+            app_knowledge=app_knowledge,
+            documents=documents,
+            document_metadata=document_metadata,
+            upsert=_bool_str(upsert),
+        )
+        return _unwrap(resp)
+
+    def ingest_many(
+        self,
+        *,
+        kind: str,
+        documents: list[File],
+        upsert: bool | None = None,
+        document_metadata: str | None = None,
+        database: str | None = None,
+        collection: str | None = None,
+    ) -> dict:
+        """Ingest N files by looping :meth:`ingest` once per file and merging the
+        per-file results into one response — the SDK accepts a single file per
+        call, so files must never be silently dropped."""
+        merged: dict[str, Any] = {"success_count": 0, "failed_count": 0, "results": []}
+        for document in documents:
+            result = self.ingest(
+                kind=kind,
+                documents=document,
+                upsert=upsert,
+                document_metadata=document_metadata,
+                database=database,
+                collection=collection,
+            )
+            merged["success_count"] += result.get("success_count") or 0
+            merged["failed_count"] += result.get("failed_count") or 0
+            merged["results"].extend(result.get("results") or [])
+        return merged
+
+    def list(
+        self,
+        *,
+        kind: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+        ids: list[str] | None = None,
+        database: str | None = None,
+        collection: str | None = None,
+    ) -> dict:
+        resp = self._invoke(
+            self._w._sdk.context.list,
+            database=self._w._require_database(database),
+            collection=self._w._resolve_collection(collection),
+            type=kind,
+            page=page,
+            page_size=page_size,
+            ids=ids,
+        )
+        data = _unwrap(resp)
+        # The v2 list payload nests the real fields under `inner`; flatten it so
+        # callers see the familiar {sources, total, pagination, ...} shape.
+        if isinstance(data, dict):
+            inner = data.get("inner")
+            if isinstance(inner, dict):
+                return inner
+            if "inner" in data:
+                return {k: v for k, v in data.items() if k != "inner"}
+        return data
+
+    def inspect(
+        self,
+        *,
+        id: str,
+        mode: str | None = None,
+        expiry_seconds: int | None = None,
+        database: str | None = None,
+        collection: str | None = None,
+    ) -> dict:
+        """Fetch a source's content, inferred content, and a download URL (was
+        "fetch content")."""
+        resp = self._invoke(
+            self._w._sdk.context.inspect,
+            id=id,
+            database=self._w._require_database(database),
+            collection=self._w._resolve_collection(collection),
+            mode=mode,
+            expiry_seconds=expiry_seconds,
+        )
+        return _unwrap(resp)
+
+    def delete(
+        self,
+        *,
+        ids: list[str],
+        kind: str | None = None,
+        database: str | None = None,
+        collection: str | None = None,
+    ) -> dict:
+        resp = self._invoke(
+            self._w._sdk.context.delete,
+            database=self._w._require_database(database),
+            collection=self._w._resolve_collection(collection),
+            ids=ids,
+            type=kind,
+        )
+        return _unwrap(resp)
+
+    def relations(
+        self,
+        *,
+        id: str | None = None,
+        kind: str | None = None,
+        limit: int | None = None,
+        cursor: float | None = None,
+        database: str | None = None,
+        collection: str | None = None,
+    ) -> dict:
+        resp = self._invoke(
+            self._w._sdk.context.relations,
+            database=self._w._require_database(database),
+            collection=self._w._resolve_collection(collection),
+            id=id,
+            type=kind,
+            limit=limit,
+            cursor=cursor,
+        )
+        return _unwrap(resp)
+
+    def ingestion_status(
+        self,
+        *,
+        ids: list[str],
+        database: str | None = None,
+        collection: str | None = None,
+    ) -> dict:
+        """Per-source indexing progress (CONTRACT: renamed away from ``status``)."""
+        resp = self._invoke(
+            self._w._sdk.context.status,
+            database=self._w._require_database(database),
+            collection=self._w._resolve_collection(collection),
+            ids=ids,
+        )
+        return _unwrap(resp)
+
+
+class HydraDB:
+    """Canonical, hand-owned wrapper around the generated ``hydra_db`` SDK.
+
+    Exposes :attr:`databases` and :attr:`context` sub-resources whose method
+    names follow the shared contract's canonical vocabulary.
+    """
+
+    def __init__(
+        self,
+        *,
+        token: str | None = None,
+        base_url: str | None = None,
+        database: str | None = None,
+        collection: str | None = None,
+        timeout: float = 60.0,
+    ):
+        self._sdk = _SdkHydraDB(token=token, base_url=base_url, timeout=timeout)
+        self.default_database = database
+        self.default_collection = collection
+        self.databases = _Databases(self)
+        self.context = _Context(self)
+
+    def _require_database(self, database: str | None) -> str:
+        db = database or self.default_database
+        if not db or not str(db).strip():
+            raise HydraDBClientError(
+                0,
+                "No database specified. Use --database or run 'hydradb config set tenant_id <id>'.",
+            )
+        return db
+
+    def _resolve_collection(self, collection: str | None) -> str | None:
+        return collection or self.default_collection

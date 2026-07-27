@@ -36,9 +36,25 @@ _output_format: str = "human"
 BRAND = "[bold cyan]///[/bold cyan]"
 
 
+_warned_deprecations: set[str] = set()
+
+
 def set_output_format(fmt: str) -> None:
     global _output_format
     _output_format = fmt
+
+
+def warn_deprecated(old: str, new: str) -> None:
+    """Emit exactly one stderr warning naming the canonical replacement.
+
+    Always goes to stderr (never stdout) so ``--output json`` stays clean, and
+    is emitted at most once per process for a given (old, new) pair.
+    """
+    key = f"{old}=>{new}"
+    if key in _warned_deprecations:
+        return
+    _warned_deprecations.add(key)
+    err_console.print(f"[hydra.warning]warning:[/hydra.warning] '{old}' is deprecated; use '{new}' instead.")
 
 
 def get_output_format() -> str:
