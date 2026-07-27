@@ -21,13 +21,15 @@ from hydradb_cli.output import (
     spinner,
     warn_deprecated,
 )
-from hydradb_cli.utils.common import build_wrapper, mask_api_key
+from hydradb_cli.utils.common import build_wrapper, mask_api_key, resolve_scope_flags
 
 
 def login(
     api_key: str | None = typer.Option(None, "--api-key", help="Your HydraDB API key (Bearer token)."),
-    tenant_id: str | None = typer.Option(None, "--tenant-id", help="Default database to use for all commands."),
-    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Default collection."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Default database to use for all commands."),
+    collection: str | None = typer.Option(None, "--collection", help="Default collection."),
+    tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
+    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", hidden=True),
     base_url: str | None = typer.Option(
         None, "--base-url", help="Custom API base URL (default: https://api.hydradb.com)."
     ),
@@ -39,6 +41,7 @@ def login(
     For interactive use, omit --api-key and you will be prompted.
     For agents/scripts, always pass --api-key explicitly.
     """
+    tid, stid = resolve_scope_flags(database, collection, tenant_id, sub_tenant_id)
     if api_key is None:
         if sys.stdin.isatty():
             api_key = typer.prompt("Enter your HydraDB API key", hide_input=True)
@@ -50,11 +53,11 @@ def login(
 
     validation_warning: str | None = None
 
-    if tenant_id:
-        wrapper = build_wrapper(api_key=api_key, base_url=base_url, database=tenant_id)
+    if tid:
+        wrapper = build_wrapper(api_key=api_key, base_url=base_url, database=tid)
         with spinner("Validating credentials..."):
             try:
-                wrapper.databases.readiness(database=tenant_id)
+                wrapper.databases.readiness(database=tid)
             except HydraDBClientError as e:
                 if e.status_code == 401:
                     print_error("Invalid API key. Authentication failed.")
@@ -66,7 +69,7 @@ def login(
                     )
                 elif e.status_code != 0:
                     validation_warning = (
-                        f"Could not validate against database '{tenant_id}' "
+                        f"Could not validate against database '{tid}' "
                         f"(HTTP {e.status_code}). Credentials saved — verify with 'hydradb doctor'."
                     )
                 else:
@@ -79,15 +82,15 @@ def login(
                     "Could not reach the API to validate credentials. Credentials saved — verify with 'hydradb doctor'."
                 )
 
-    save_config(api_key=api_key, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id, base_url=base_url)
+    save_config(api_key=api_key, database=tid, collection=stid, base_url=base_url)
 
     def fmt(r: dict):
         lines = [
             "[green]✓[/green] Logged in to HydraDB",
             "  [dim]Credentials saved to ~/.hydradb/config.json[/dim]",
         ]
-        if tenant_id:
-            lines.append(f"  [cyan]Database:[/cyan] {tenant_id}")
+        if tid:
+            lines.append(f"  [cyan]Database:[/cyan] {tid}")
         if validation_warning:
             lines.append(f"\n  [yellow]![/yellow] {validation_warning}")
         return Panel(
@@ -99,7 +102,10 @@ def login(
     result = {
         "success": True,
         "message": "Logged in to HydraDB. Credentials saved to ~/.hydradb/config.json",
-        "tenant_id": tenant_id,
+        # `tenant_id` is part of the documented --output json contract (CONTRACT §3);
+        # kept verbatim, with the canonical `database` alongside it.
+        "tenant_id": tid,
+        "database": tid,
     }
     if validation_warning:
         result["warning"] = validation_warning

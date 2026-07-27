@@ -33,7 +33,9 @@ _DEPRECATED_ENV_ALIASES: dict[str, list[str]] = {
     ENV_API_KEY: ["HYDRA_DB_API_KEY"],
     ENV_DATABASE: ["HYDRA_DB_TENANT_ID"],
     ENV_COLLECTION: ["HYDRA_DB_SUB_TENANT_ID"],
-    ENV_BASE_URL: ["HYDRA_DB_BASE_URL"],
+    # `HYDRADB_API_URL` is the spelling the CLI's own docs page shipped, so it is one of
+    # this client's historical names under the §1 per-client scoping rule.
+    ENV_BASE_URL: ["HYDRA_DB_BASE_URL", "HYDRADB_API_URL"],
 }
 
 DEFAULT_BASE_URL = "https://api.hydradb.com"

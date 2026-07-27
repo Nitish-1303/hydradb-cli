@@ -17,7 +17,7 @@ from rich.panel import Panel
 from hydradb_cli.commands import _impl
 from hydradb_cli.config import get_full_config
 from hydradb_cli.output import console, make_kv_table, print_error, print_json, spinner
-from hydradb_cli.utils.common import mask_api_key, read_stdin_safe
+from hydradb_cli.utils.common import mask_api_key, read_stdin_safe, resolve_scope_flags
 
 database_app = typer.Typer(help="Manage [bold]databases[/bold] (create, delete, list, collections, stats, readiness).")
 
@@ -57,10 +57,13 @@ def query(
         None, "--graph-context/--no-graph-context", help="Include knowledge graph relations."
     ),
     additional_context: str | None = typer.Option(None, "--context", help="Additional context to guide retrieval."),
-    tenant_id: str | None = typer.Option(None, "--tenant-id", help="Database. Uses default if not specified."),
-    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Collection."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if not specified."),
+    collection: str | None = typer.Option(None, "--collection", help="Collection."),
+    tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
+    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", hidden=True),
 ) -> None:
     """Query knowledge or memories — the single retrieval entry point."""
+    tid, stid = resolve_scope_flags(database, collection, tenant_id, sub_tenant_id)
     _impl.do_query(
         query_text,
         kind=kind,
@@ -71,8 +74,8 @@ def query(
         recency_bias=recency_bias,
         graph_context=graph_context,
         additional_context=additional_context,
-        tenant_id=tenant_id,
-        sub_tenant_id=sub_tenant_id,
+        tenant_id=tid,
+        sub_tenant_id=stid,
     )
 
 
@@ -86,10 +89,13 @@ def ingest(
     infer: bool = typer.Option(True, "--infer/--no-infer", help="Extract insights and build knowledge graph."),
     markdown: bool = typer.Option(False, "--markdown", help="Treat text as markdown (memory only)."),
     upsert: bool = typer.Option(True, "--upsert/--no-upsert", help="Update existing items with the same source_id."),
-    tenant_id: str | None = typer.Option(None, "--tenant-id", help="Database. Uses default if not specified."),
-    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Collection."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if not specified."),
+    collection: str | None = typer.Option(None, "--collection", help="Collection."),
+    tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
+    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", hidden=True),
 ) -> None:
     """Ingest a memory, knowledge text, or knowledge file(s)."""
+    tid, stid = resolve_scope_flags(database, collection, tenant_id, sub_tenant_id)
     if files:
         # Files are always knowledge sources. Reject every option that would be
         # silently ignored rather than storing the file the wrong way. Only
@@ -102,15 +108,15 @@ def ingest(
             print_error("--markdown does not apply to file ingest; pass files only.")
         if not infer:
             print_error("--infer/--no-infer does not apply to file ingest; pass files only.")
-        _impl.do_ingest_knowledge_files(files, upsert=upsert, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
+        _impl.do_ingest_knowledge_files(files, upsert=upsert, tenant_id=tid, sub_tenant_id=stid)
         return
     if kind == "knowledge":
         _impl.do_ingest_knowledge_text(
             _resolve_text_input(text),
             title=title,
             source_id=source_id,
-            tenant_id=tenant_id,
-            sub_tenant_id=sub_tenant_id,
+            tenant_id=tid,
+            sub_tenant_id=stid,
         )
         return
     _impl.do_ingest_memory(
@@ -121,8 +127,8 @@ def ingest(
         infer=infer,
         markdown=markdown,
         upsert=upsert,
-        tenant_id=tenant_id,
-        sub_tenant_id=sub_tenant_id,
+        tenant_id=tid,
+        sub_tenant_id=stid,
     )
 
 
@@ -130,57 +136,72 @@ def list_items(
     kind: str | None = typer.Option(None, "--kind", help="Filter by kind: 'memory' or 'knowledge'."),
     page: int | None = typer.Option(None, "--page", help="Page number (1-indexed)."),
     page_size: int | None = typer.Option(None, "--page-size", help="Items per page (1-100)."),
-    tenant_id: str | None = typer.Option(None, "--tenant-id", help="Database. Uses default if not specified."),
-    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Collection."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if not specified."),
+    collection: str | None = typer.Option(None, "--collection", help="Collection."),
+    tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
+    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", hidden=True),
 ) -> None:
     """List ingested sources and memories."""
-    _impl.do_list(kind=kind, page=page, page_size=page_size, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
+    tid, stid = resolve_scope_flags(database, collection, tenant_id, sub_tenant_id)
+    _impl.do_list(kind=kind, page=page, page_size=page_size, tenant_id=tid, sub_tenant_id=stid)
 
 
 def inspect(
     source_id: str = typer.Argument(help="Source ID to inspect."),
     mode: str = typer.Option("content", "--mode", help="Fetch mode: 'content', 'url', or 'both'."),
-    tenant_id: str | None = typer.Option(None, "--tenant-id", help="Database. Uses default if not specified."),
-    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Collection."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if not specified."),
+    collection: str | None = typer.Option(None, "--collection", help="Collection."),
+    tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
+    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", hidden=True),
 ) -> None:
     """Inspect a source's content by its ID."""
-    _impl.do_inspect(source_id, mode=mode, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
+    tid, stid = resolve_scope_flags(database, collection, tenant_id, sub_tenant_id)
+    _impl.do_inspect(source_id, mode=mode, tenant_id=tid, sub_tenant_id=stid)
 
 
 def delete(
     ids: list[str] = typer.Argument(help="One or more IDs to delete."),
     kind: str = typer.Option("knowledge", "--kind", help="Kind to delete: 'memory' or 'knowledge'."),
-    tenant_id: str | None = typer.Option(None, "--tenant-id", help="Database. Uses default if not specified."),
-    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Collection."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if not specified."),
+    collection: str | None = typer.Option(None, "--collection", help="Collection."),
+    tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
+    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", hidden=True),
     confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete memories or knowledge sources by ID."""
+    tid, stid = resolve_scope_flags(database, collection, tenant_id, sub_tenant_id)
     clean_ids = [i.strip() for i in ids if i.strip()]
     if not clean_ids:
         print_error("At least one ID is required.")
     if not confirm:
         typer.confirm(f"Delete {len(clean_ids)} item(s)? This action is irreversible.", abort=True)
-    _impl.do_delete(clean_ids, kind=kind, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
+    _impl.do_delete(clean_ids, kind=kind, tenant_id=tid, sub_tenant_id=stid)
 
 
 def relations(
     source_id: str = typer.Argument(help="Source ID to fetch graph relations for."),
     kind: str | None = typer.Option(None, "--kind", help="Corpus: 'memory' or 'knowledge'."),
     limit: int | None = typer.Option(None, "--limit", help="Maximum number of relations to return."),
-    tenant_id: str | None = typer.Option(None, "--tenant-id", help="Database. Uses default if not specified."),
-    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Collection."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if not specified."),
+    collection: str | None = typer.Option(None, "--collection", help="Collection."),
+    tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
+    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", hidden=True),
 ) -> None:
     """Fetch knowledge-graph relations for a source."""
-    _impl.do_relations(source_id, kind=kind, limit=limit, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
+    tid, stid = resolve_scope_flags(database, collection, tenant_id, sub_tenant_id)
+    _impl.do_relations(source_id, kind=kind, limit=limit, tenant_id=tid, sub_tenant_id=stid)
 
 
 def verify(
     ids: list[str] = typer.Argument(help="One or more source IDs to check."),
-    tenant_id: str | None = typer.Option(None, "--tenant-id", help="Database. Uses default if not specified."),
-    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", help="Collection."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if not specified."),
+    collection: str | None = typer.Option(None, "--collection", help="Collection."),
+    tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
+    sub_tenant_id: str | None = typer.Option(None, "--sub-tenant-id", hidden=True),
 ) -> None:
     """Check per-source ingestion status (indexing progress)."""
-    _impl.do_ingestion_status(ids, tenant_id=tenant_id, sub_tenant_id=sub_tenant_id)
+    tid, stid = resolve_scope_flags(database, collection, tenant_id, sub_tenant_id)
+    _impl.do_ingestion_status(ids, tenant_id=tid, sub_tenant_id=stid)
 
 
 def doctor() -> None:
@@ -265,34 +286,42 @@ def database_list() -> None:
 @database_app.command("collections")
 def database_collections(
     tenant_id_arg: str | None = typer.Argument(None, metavar="DATABASE", help="Database. Uses default if omitted."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if omitted."),
     tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
 ) -> None:
     """List collections for a database."""
-    _impl.do_database_collections(tenant_id or tenant_id_arg)
+    db, _ = resolve_scope_flags(database, None, tenant_id, None)
+    _impl.do_database_collections(db or tenant_id_arg)
 
 
 @database_app.command("stats")
 def database_stats(
     tenant_id_arg: str | None = typer.Argument(None, metavar="DATABASE", help="Database. Uses default if omitted."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if omitted."),
     tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
 ) -> None:
     """Show row-count statistics for a database."""
-    _impl.do_database_stats(tenant_id or tenant_id_arg)
+    db, _ = resolve_scope_flags(database, None, tenant_id, None)
+    _impl.do_database_stats(db or tenant_id_arg)
 
 
 @database_app.command("readiness")
 def database_readiness(
     tenant_id_arg: str | None = typer.Argument(None, metavar="DATABASE", help="Database. Uses default if omitted."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if omitted."),
     tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
 ) -> None:
     """Check whether a database is provisioned and ready for ingestion."""
-    _impl.do_database_readiness(tenant_id or tenant_id_arg)
+    db, _ = resolve_scope_flags(database, None, tenant_id, None)
+    _impl.do_database_readiness(db or tenant_id_arg)
 
 
 @database_app.command("monitor")
 def database_monitor(
     tenant_id_arg: str | None = typer.Argument(None, metavar="DATABASE", help="Database. Uses default if omitted."),
+    database: str | None = typer.Option(None, "--database", "-d", help="Database. Uses default if omitted."),
     tenant_id: str | None = typer.Option(None, "--tenant-id", hidden=True),
 ) -> None:
     """Merged database stats + readiness."""
-    _impl.do_database_monitor(tenant_id or tenant_id_arg)
+    db, _ = resolve_scope_flags(database, None, tenant_id, None)
+    _impl.do_database_monitor(db or tenant_id_arg)

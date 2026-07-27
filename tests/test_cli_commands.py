@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+import hydradb_cli.config
+import hydradb_cli.output
 from hydradb_cli.config import save_config
 from hydradb_cli.main import app
 
@@ -39,12 +41,19 @@ _HYDRA_ENV_VARS = (
 
 @pytest.fixture(autouse=True)
 def clean_config(tmp_path, monkeypatch):
-    """Use temp config and a clean environment for all tests."""
+    """Use temp config and a clean environment for all tests.
+
+    Also resets the one-warning-per-process dedupe sets. Without this, two tests that
+    exercise the *same* deprecated name in one pytest session would see the warning only
+    in whichever ran first.
+    """
     config_dir = tmp_path / ".hydradb"
     monkeypatch.setattr("hydradb_cli.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("hydradb_cli.config.CONFIG_FILE", config_dir / "config.json")
     for var in _HYDRA_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+    hydradb_cli.output._warned_deprecations.clear()
+    hydradb_cli.config._warned_env_aliases.clear()
     yield
 
 
@@ -534,7 +543,8 @@ class TestAuthAndConfig:
         with patch("hydradb_cli.commands.auth.build_wrapper", return_value=w):
             result = runner.invoke(app, ["--output", "json", "login", "--api-key", "k-abc", "--tenant-id", "t1"])
         assert result.exit_code == 0
-        assert json.loads(result.output)["success"] is True
+        # `--tenant-id` warns on stderr; stdout must stay pure JSON.
+        assert json.loads(result.stdout)["success"] is True
 
     def test_login_invalid_key_warns(self):
         from hydradb_cli.hydra import HydraDBClientError
@@ -578,6 +588,116 @@ class TestAuthAndConfig:
         assert "base_url" in json.loads(result.output)
 
 
+class TestScopeFlags:
+    """Canonical --database/--collection (CONTRACT §1); --tenant-id/--sub-tenant-id warn.
+
+    The scope flags are declared identically on every canonical command and collapsed by
+    one helper, so these cover the helper's behaviour once and its wiring per command.
+    """
+
+    # (argv, wrapper mock spec, resource, method) for every command taking scope flags.
+    SCOPED = [
+        (["query", "q"], {"context.query": {"chunks": []}}, "context", "query"),
+        (["ingest", "--text", "t"], {"context.ingest": {"success_count": 1}}, "context", "ingest"),
+        (["list"], {"context.list": {"sources": []}}, "context", "list"),
+        (["inspect", "s1"], {"context.inspect": {"content": {}}}, "context", "inspect"),
+        (["delete", "s1", "--yes"], {"context.delete": {"success": True}}, "context", "delete"),
+        (["relations", "s1"], {"context.relations": {"relations": []}}, "context", "relations"),
+        (["verify", "s1"], {"context.ingestion_status": {"statuses": []}}, "context", "ingestion_status"),
+    ]
+
+    @pytest.mark.parametrize("argv,spec,resource,method", SCOPED, ids=[a[0] for a, _, _, _ in SCOPED])
+    def test_canonical_database_flag_reaches_wrapper(self, argv, spec, resource, method):
+        _auth()
+        w = _wrapper(**spec)
+        with _patch_wrapper(w):
+            result = runner.invoke(app, [*argv, "--database", "canon-db"])
+        assert result.exit_code == 0, result.output
+        assert getattr(getattr(w, resource), method).call_args.kwargs["database"] == "canon-db"
+        assert "deprecated" not in result.stderr
+
+    @pytest.mark.parametrize("argv,spec,resource,method", SCOPED, ids=[a[0] for a, _, _, _ in SCOPED])
+    def test_legacy_tenant_id_flag_still_works_and_warns(self, argv, spec, resource, method):
+        _auth()
+        w = _wrapper(**spec)
+        with _patch_wrapper(w):
+            result = runner.invoke(app, [*argv, "--tenant-id", "legacy-db"])
+        assert result.exit_code == 0, result.output
+        assert getattr(getattr(w, resource), method).call_args.kwargs["database"] == "legacy-db"
+        assert "'--tenant-id' is deprecated; use '--database'" in result.stderr
+
+    def test_canonical_collection_flag(self):
+        _auth()
+        w = _wrapper(**{"context.query": {"chunks": []}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["query", "q", "--database", "d", "--collection", "c1"])
+        assert result.exit_code == 0
+        assert w.context.query.call_args.kwargs["collection"] == "c1"
+        assert "deprecated" not in result.stderr
+
+    def test_legacy_sub_tenant_id_warns(self):
+        _auth()
+        w = _wrapper(**{"context.query": {"chunks": []}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["query", "q", "--sub-tenant-id", "c1"])
+        assert result.exit_code == 0
+        assert w.context.query.call_args.kwargs["collection"] == "c1"
+        assert "'--sub-tenant-id' is deprecated; use '--collection'" in result.stderr
+
+    def test_canonical_wins_when_both_given_without_warning(self):
+        _auth()
+        w = _wrapper(**{"context.query": {"chunks": []}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["query", "q", "--database", "canon", "--tenant-id", "legacy"])
+        assert result.exit_code == 0
+        assert w.context.query.call_args.kwargs["database"] == "canon"
+        # No warning: the caller already uses the canonical spelling.
+        assert "deprecated" not in result.stderr
+
+    def test_deprecation_warning_keeps_json_stdout_parseable(self):
+        """The warning must go to stderr only, or it corrupts the documented jq contract."""
+        _auth()
+        w = _wrapper(**{"context.query": {"chunks": [{"chunk_content": "hit"}]}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["--output", "json", "query", "q", "--tenant-id", "legacy-db"])
+        assert result.exit_code == 0
+        # `.output` merges both streams; `.stdout` is what a `jq` pipeline actually reads.
+        assert json.loads(result.stdout)["chunks"][0]["chunk_content"] == "hit"
+        assert "deprecated" in result.stderr
+
+    def test_short_d_flag(self):
+        _auth()
+        w = _wrapper(**{"context.list": {"sources": []}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["list", "-d", "short-db"])
+        assert result.exit_code == 0
+        assert w.context.list.call_args.kwargs["database"] == "short-db"
+
+    def test_legacy_flags_hidden_from_help(self):
+        result = runner.invoke(app, ["query", "--help"])
+        assert "--database" in result.output
+        assert "--collection" in result.output
+        assert "--tenant-id" not in result.output
+        assert "--sub-tenant-id" not in result.output
+
+    def test_database_group_canonical_flag_warns_on_legacy(self):
+        _auth()
+        w = _wrapper(**{"databases.collections": {"collections": ["c1"]}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["database", "collections", "--tenant-id", "legacy-db"])
+        assert result.exit_code == 0
+        assert "'--tenant-id' is deprecated; use '--database'" in result.stderr
+
+    def test_login_canonical_database_flag(self):
+        w = _wrapper(**{"databases.readiness": {"infra": {"ready_for_ingestion": True}}})
+        with patch("hydradb_cli.commands.auth.build_wrapper", return_value=w):
+            result = runner.invoke(app, ["login", "--api-key", "k-abcdef1234567890", "--database", "canon-db"])
+        assert result.exit_code == 0
+        assert "deprecated" not in result.stderr
+        # Saved under the canonical config key and readable back.
+        assert "canon-db" in runner.invoke(app, ["doctor"]).output
+
+
 class TestOutputFormat:
     def test_invalid_output_format(self):
         result = runner.invoke(app, ["--output", "xml", "doctor"])
@@ -586,4 +706,6 @@ class TestOutputFormat:
     def test_whoami_json_is_valid(self):
         result = runner.invoke(app, ["--output", "json", "whoami"])
         assert result.exit_code == 0
-        assert isinstance(json.loads(result.output), dict)
+        # `whoami` itself is deprecated and warns on stderr; stdout must stay pure JSON.
+        assert isinstance(json.loads(result.stdout), dict)
+        assert "deprecated" in result.stderr

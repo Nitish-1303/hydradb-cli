@@ -6,7 +6,7 @@ import httpx
 
 from hydradb_cli.config import get_api_key, get_base_url, get_collection, get_database
 from hydradb_cli.hydra import HydraDB, HydraDBClientError
-from hydradb_cli.output import print_error
+from hydradb_cli.output import print_error, warn_deprecated
 
 
 def mask_api_key(key: str) -> str:
@@ -28,13 +28,33 @@ def require_tenant_id(tenant_id: str | None = None) -> str:
     """Get the database (tenant) scope from argument, config, or exit with error."""
     tid = tenant_id or get_database()
     if not tid or not tid.strip():
-        print_error("No database specified. Use --tenant-id or run 'hydradb config set tenant_id <id>'.")
+        print_error("No database specified. Use --database or run 'hydradb config set database <id>'.")
     return tid  # type: ignore[return-value]
 
 
 def resolve_sub_tenant_id(sub_tenant_id: str | None = None) -> str | None:
     """Get the collection (sub-tenant) scope from argument or config (may be None)."""
     return sub_tenant_id or get_collection()
+
+
+def resolve_scope_flags(
+    database: str | None = None,
+    collection: str | None = None,
+    tenant_id: str | None = None,
+    sub_tenant_id: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Collapse the canonical and deprecated scope flags into one pair (CONTRACT §1).
+
+    ``--database``/``--collection`` are canonical; ``--tenant-id``/``--sub-tenant-id``
+    remain as hidden aliases that warn once each. The canonical spelling wins when both
+    are given. Every command routes its scope flags through here so the warning is
+    emitted in exactly one place.
+    """
+    if tenant_id and not database:
+        warn_deprecated("--tenant-id", "--database")
+    if sub_tenant_id and not collection:
+        warn_deprecated("--sub-tenant-id", "--collection")
+    return database or tenant_id, collection or sub_tenant_id
 
 
 def build_wrapper(
