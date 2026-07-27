@@ -7,6 +7,7 @@ stderr deprecation warning.
 """
 
 import json
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -73,6 +74,26 @@ def _wrapper(**returns):
 
 def _patch_wrapper(w):
     return patch("hydradb_cli.commands._impl.get_wrapper", return_value=w)
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _help_text(*argv: str) -> str:
+    """`--help` output as flat, colourless text.
+
+    Rich wraps to the terminal width and injects ANSI codes, so a bare substring check
+    against ``result.output`` passes on a wide dev terminal and fails on CI's 80 columns.
+    Force a wide, colourless render and strip what is left.
+    """
+    result = runner.invoke(
+        app,
+        [*argv, "--help"],
+        env={"COLUMNS": "200", "TERM": "dumb", "NO_COLOR": "1"},
+    )
+    assert result.exit_code == 0
+    # Rich may still break a long line; collapse whitespace so flags stay contiguous.
+    return re.sub(r"\s+", " ", _ANSI_RE.sub("", result.output))
 
 
 class TestVersionHelp:
@@ -674,11 +695,11 @@ class TestScopeFlags:
         assert w.context.list.call_args.kwargs["database"] == "short-db"
 
     def test_legacy_flags_hidden_from_help(self):
-        result = runner.invoke(app, ["query", "--help"])
-        assert "--database" in result.output
-        assert "--collection" in result.output
-        assert "--tenant-id" not in result.output
-        assert "--sub-tenant-id" not in result.output
+        help_text = _help_text("query")
+        assert "--database" in help_text
+        assert "--collection" in help_text
+        assert "--tenant-id" not in help_text
+        assert "--sub-tenant-id" not in help_text
 
     def test_database_group_canonical_flag_warns_on_legacy(self):
         _auth()
