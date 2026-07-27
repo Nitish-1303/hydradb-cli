@@ -2,6 +2,7 @@
 
 import pytest
 
+import hydradb_cli.config
 from hydradb_cli.config import (
     DEFAULT_BASE_URL,
     ENV_API_KEY,
@@ -94,6 +95,43 @@ class TestEnvVarOverride:
         save_config(base_url="https://file.api.com")
         monkeypatch.setenv(ENV_BASE_URL, "https://env.api.com")
         assert get_base_url() == "https://env.api.com"
+
+
+class TestDeprecatedEnvAliases:
+    """`HYDRADB_API_URL` is the base-URL spelling this client's docs page shipped, so
+    CONTRACT §1's per-client scoping rule makes it one of the CLI's legacy names."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_warnings(self):
+        hydradb_cli.config._warned_env_aliases.clear()
+        yield
+
+    def test_hydradb_api_url_is_honoured(self, clean_config, monkeypatch):
+        monkeypatch.setenv("HYDRADB_API_URL", "https://legacy.api.com")
+        assert get_base_url() == "https://legacy.api.com"
+
+    def test_hydradb_api_url_warns_once(self, clean_config, monkeypatch, capsys):
+        monkeypatch.setenv("HYDRADB_API_URL", "https://legacy.api.com")
+        get_base_url()
+        get_base_url()
+        err = capsys.readouterr().err
+        assert err.count("HYDRADB_API_URL is deprecated") == 1
+        assert "HYDRADB_BASE_URL" in err
+
+    def test_canonical_base_url_wins_and_is_silent(self, clean_config, monkeypatch, capsys):
+        monkeypatch.setenv("HYDRADB_API_URL", "https://legacy.api.com")
+        monkeypatch.setenv(ENV_BASE_URL, "https://canonical.api.com")
+        assert get_base_url() == "https://canonical.api.com"
+        assert capsys.readouterr().err == ""
+
+    def test_hydra_db_base_url_still_honoured(self, clean_config, monkeypatch):
+        monkeypatch.setenv("HYDRA_DB_BASE_URL", "https://old.api.com")
+        assert get_base_url() == "https://old.api.com"
+
+    def test_other_clients_prefixes_are_not_read(self, clean_config, monkeypatch):
+        """§1: a client reads only the legacy prefixes it itself shipped."""
+        monkeypatch.setenv("HYDRA_OPENCLAW_API_KEY", "openclaw-key")
+        assert get_api_key() is None
 
 
 class TestDefaults:

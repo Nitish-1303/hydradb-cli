@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — PRO-1299: canonical `--database` / `--collection` flags
+
+Finishes the vocabulary alignment PRO-1298 started. The commands were renamed to the
+canonical verbs, but their scope *flags* still said "tenant" — the one word CONTRACT §1
+bans. This is what lets `plugins/cli.mdx` be written entirely in canonical terms.
+
+### Added
+- Canonical `--database` / `-d` and `--collection` on every command taking a scope:
+  `query`, `ingest`, `list`, `inspect`, `delete`, `relations`, `verify`, `login`, and the
+  `database {collections,stats,readiness,monitor}` sub-commands.
+- `HYDRADB_API_URL` is now honoured as a deprecated alias of `HYDRADB_BASE_URL`. It is the
+  spelling the CLI's own docs page shipped, so §1's per-client scoping rule makes it one of
+  this client's legacy names; `conformance/vectors.json` already listed it.
+
+### Changed
+- `--tenant-id` / `--sub-tenant-id` still work but are hidden from `--help` and emit a
+  one-line stderr deprecation warning naming the canonical flag. The canonical spelling
+  wins, silently, when both are given.
+- `login` now writes the canonical `database` / `collection` config keys rather than the
+  deprecated `tenant_id` / `sub_tenant_id` ones. Both are still read.
+- `login --output json` gains a `database` field; the existing `tenant_id` field is kept
+  verbatim because it is part of the documented `--output json` contract (§3).
+- "No database specified" now points at `--database` and `config set database`.
+
+### Fixed
+- `__version__` said `0.1.0` while `pyproject.toml` said `0.1.1`, so `hydradb --version`
+  would have misreported after release.
+
 ## Unreleased — PRO-1298: migrate onto `hydradb-sdk` behind a hand-owned wrapper
 
 The CLI now calls the generated `hydradb-sdk` (pinned exactly at `2.1.2`) through
