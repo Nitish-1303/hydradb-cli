@@ -1,81 +1,79 @@
 # Changelog
 
-## Unreleased — PRO-1299: canonical `--database` / `--collection` flags
+## 0.1.1 — 2026-07-27
 
-Finishes the vocabulary alignment PRO-1298 started. The commands were renamed to the
-canonical verbs, but their scope *flags* still said "tenant" — the one word CONTRACT §1
-bans. This is what lets `plugins/cli.mdx` be written entirely in canonical terms.
+The CLI now talks to the HydraDB v2 API and adopts a consistent vocabulary across every
+command. Everything that worked in 0.1.0 still works: each renamed command and flag is
+kept as an alias that prints a one-line deprecation warning naming its replacement, so
+existing scripts keep running while you migrate.
 
-### Added
-- Canonical `--database` / `-d` and `--collection` on every command taking a scope:
-  `query`, `ingest`, `list`, `inspect`, `delete`, `relations`, `verify`, `login`, and the
-  `database {collections,stats,readiness,monitor}` sub-commands.
-- `HYDRADB_API_URL` is now honoured as a deprecated alias of `HYDRADB_BASE_URL`. It is the
-  spelling the CLI's own docs page shipped, so §1's per-client scoping rule makes it one of
-  this client's legacy names; `conformance/vectors.json` already listed it.
-
-### Changed
-- `--tenant-id` / `--sub-tenant-id` still work but are hidden from `--help` and emit a
-  one-line stderr deprecation warning naming the canonical flag. The canonical spelling
-  wins, silently, when both are given.
-- `login` now writes the canonical `database` / `collection` config keys rather than the
-  deprecated `tenant_id` / `sub_tenant_id` ones. Both are still read.
-- `login --output json` gains a `database` field; the existing `tenant_id` field is kept
-  verbatim because it is part of the documented `--output json` contract (§3).
-- "No database specified" now points at `--database` and `config set database`.
-
-### Fixed
-- `__version__` said `0.1.0` while `pyproject.toml` said `0.1.1`, so `hydradb --version`
-  would have misreported after release.
-
-## Unreleased — PRO-1298: migrate onto `hydradb-sdk` behind a hand-owned wrapper
-
-The CLI now calls the generated `hydradb-sdk` (pinned exactly at `2.1.2`) through
-a thin hand-owned wrapper instead of a hand-rolled HTTP client, and adopts the
-shared HydraDB canonical vocabulary.
+Warnings always go to stderr, so `--output json` pipelines are unaffected.
 
 ### Added
-- Canonical commands: `query`, `ingest`, `list`, `inspect`, `delete`,
-  `relations`, `verify`, `database {create,delete,list,collections,stats,readiness,monitor}`,
-  `doctor`.
-- Canonical env vars `HYDRADB_API_KEY` / `HYDRADB_DATABASE` / `HYDRADB_COLLECTION`
-  / `HYDRADB_BASE_URL`. The CLI's own legacy `HYDRA_DB_*` names still work as
-  deprecated aliases (one warning each).
-- Canonical config-file keys `database` / `collection` (`hydradb config set database …`).
-- A conformance runner (`conformance/`) that drives the shared `vectors.json`
-  through the wrapper against a mocked SDK transport.
+
+- **New command names**, one verb per action:
+  `query`, `ingest`, `list`, `inspect`, `delete`, `relations`, `verify`, `doctor`, and
+  `database {create,delete,list,collections,stats,readiness,monitor}`.
+- **`--database` / `-d` and `--collection`** to scope any command, replacing
+  `--tenant-id` / `--sub-tenant-id`.
+- **Environment variables** `HYDRADB_API_KEY`, `HYDRADB_DATABASE`, `HYDRADB_COLLECTION`
+  and `HYDRADB_BASE_URL`.
+- **Config keys** `database` and `collection`, e.g. `hydradb config set database my-db`.
+- **`hydradb database stats`** and **`hydradb database readiness`** as separate commands.
+  Previously this data was only available merged together via `monitor`, which is still
+  there as the combined view.
+- **`hydradb doctor`**, which reports your resolved configuration *and* whether the API is
+  reachable. It replaces `whoami`, which only ever showed local config.
+- A dependency on the official `hydradb-sdk` package, which now handles all API calls.
 
 ### Changed
-- Every legacy command (`tenant`, `memories`, `knowledge`, `recall`, `fetch`,
-  `whoami`) is now a **deprecated alias** that prints a one-line stderr warning
-  naming its canonical replacement. Behaviour is preserved.
+
+- `login` saves the `database` and `collection` config keys, and its JSON output gains a
+  `database` field. The existing `tenant_id` field is unchanged.
+- `login --output json` and every other JSON shape keep their documented `jq` paths, with
+  the two exceptions listed under Breaking.
+- The "no database specified" error now points at `--database` and
+  `hydradb config set database`.
+
+### Deprecated
+
+Each of these still works and warns once, naming its replacement:
+
+| Deprecated | Use instead |
+|---|---|
+| `memories add`, `knowledge upload`, `knowledge upload-text` | `ingest` |
+| `memories list`, `fetch sources` | `list` |
+| `memories delete`, `knowledge delete` | `delete` |
+| `knowledge verify` | `verify` |
+| `recall full`, `recall preferences`, `recall keyword` | `query` |
+| `fetch content` | `inspect` |
+| `fetch relations` | `relations` |
+| `tenant …` | `database …` |
+| `whoami` | `doctor` |
+| `--tenant-id`, `--sub-tenant-id` | `--database`, `--collection` |
+| `HYDRA_DB_*` and `HYDRADB_API_URL` env vars | `HYDRADB_*` (see Added) |
 
 ### Breaking (`--output json`)
-These two commands change their JSON shape as a direct result of the v1 → v2 API
-migration and the canonical vocabulary. The documented `jq` contract
-(`query … | jq '.chunks[0].chunk_content'`) is **unchanged** and covered by
-golden tests.
 
-- **`list`** (and its `memories list` / `fetch sources` aliases): items are now
-  under `sources` (v2), not `user_memories`. Memory items appear in the same
+Two commands change their JSON shape as a direct result of the v2 API migration. The
+documented `query … | jq '.chunks[0].chunk_content'` path is **unchanged**.
+
+- **`list`** (and its `memories list` / `fetch sources` aliases): items are now under
+  `sources` rather than `user_memories`. Memories and knowledge appear in the same
   `sources` array.
-- **`database monitor`** (and the `tenant monitor` alias): now returns a merged
-  `{ "database", "stats", "readiness" }` object instead of the single v1 monitor
-  payload. The underlying single-purpose data is also available as separate
-  clean commands — `hydradb database stats` and `hydradb database readiness` —
-  with `monitor` kept only as the merged façade/alias.
+- **`database monitor`** (and the `tenant monitor` alias): returns a merged
+  `{ "database", "stats", "readiness" }` object. The individual pieces are now available
+  from `database stats` and `database readiness`.
 
 ### Fixed
-- Ingest result rendering no longer shows `unknown` when the server returns the
-  source identifier as `id` (v2) instead of `source_id` — the formatter now
-  falls back to `id`.
-- `ingest --kind knowledge --text … --source-id foo` sends the item via
-  `app_knowledge` so the client-assigned `id` is preserved verbatim as the
-  source_id; a later `delete foo` matches. (A `documents` upload would get a
-  server-minted id and silently fail to delete.) Raw file uploads still use
-  `documents`.
-- `delete` of a non-existent id no longer reports success: the v2 no-op
-  (`200 {success:false}`) now yields a non-zero exit and `{"success":false,…}`
-  in JSON mode.
-- Multi-file `ingest <files>` loops one SDK call per file (the SDK's `documents`
-  takes a single file) and merges results — files are never silently dropped.
+
+- Ingesting no longer displays `Source ID: unknown` when the server returns the identifier
+  as `id`.
+- `ingest --kind knowledge --text … --source-id foo` now preserves the ID you supply, so a
+  later `delete foo` matches. Previously the server minted its own ID and the delete
+  silently failed.
+- `delete` of an ID that does not exist no longer reports success — it exits non-zero and
+  reports `{"success": false, …}` in JSON mode.
+- Ingesting multiple files at once no longer drops files; each is uploaded and the results
+  are merged.
+- `hydradb --version` reported `0.1.0` regardless of the installed version.
