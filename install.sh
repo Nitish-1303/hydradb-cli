@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
-# Install HydraDB CLI from PyPI.
+# Install HydraDB CLI from GitHub Releases.
 # Usage:
 #   curl -fsSL https://cli.hydradb.com/install | bash
 #
 # Optional:
-#   HYDRADB_CLI_VERSION=0.1.0 curl -fsSL ... | bash
+#   HYDRADB_CLI_VERSION=0.1.1 curl -fsSL ... | bash
 #   HYDRADB_CLI_FORCE=1 curl -fsSL ... | bash
+#
+# The wheel is downloaded from the GitHub release; its runtime dependencies
+# (typer, httpx, rich, hydradb-sdk) still resolve from PyPI as usual.
 
 set -euo pipefail
 
+REPO="${HYDRADB_CLI_REPO:-usecortex/hydradb-cli}"
 PACKAGE_NAME="${HYDRADB_CLI_PACKAGE:-hydradb-cli}"
 COMMAND_NAME="${HYDRADB_CLI_COMMAND:-hydradb}"
 VERSION="${HYDRADB_CLI_VERSION:-}"
 FORCE="${HYDRADB_CLI_FORCE:-0}"
-
-if [ -n "$VERSION" ]; then
-  PACKAGE_SPEC="${PACKAGE_NAME}==${VERSION}"
-else
-  PACKAGE_SPEC="${PACKAGE_NAME}"
-fi
 
 info() {
   printf '\033[1;34m[hydradb]\033[0m %s\n' "$1"
@@ -58,6 +56,62 @@ fi
 PYTHON_VERSION="$($PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')"
 info "Using Python ${PYTHON_VERSION}"
 
+# Resolve the newest published release by following the /releases/latest
+# redirect, which lands on /releases/tag/vX.Y.Z. This uses no API quota.
+resolve_latest_version() {
+  "$PYTHON" - "$REPO" <<'PY'
+import sys
+import urllib.request
+
+repo = sys.argv[1]
+url = f"https://github.com/{repo}/releases/latest"
+try:
+    with urllib.request.urlopen(url, timeout=30) as response:
+        final = response.url
+except Exception as exc:  # noqa: BLE001 - any failure means "could not resolve"
+    print(f"  reason: {exc}", file=sys.stderr)
+    raise SystemExit(1) from None
+
+tag = final.rstrip("/").rsplit("/", 1)[-1]
+if not tag or tag == "latest":
+    print(f"error: no published release found at {url}", file=sys.stderr)
+    raise SystemExit(1)
+
+print(tag[1:] if tag.startswith("v") else tag)
+PY
+}
+
+if [ -z "$VERSION" ]; then
+  info "Resolving latest release of ${REPO}"
+  VERSION="$(resolve_latest_version || true)"
+  if [ -z "$VERSION" ]; then
+    fail "Could not resolve the latest release. Pin one with HYDRADB_CLI_VERSION=<x.y.z> and try again."
+  fi
+fi
+
+# setuptools normalises the distribution name in artifact filenames.
+DIST_NAME="$(printf '%s' "$PACKAGE_NAME" | tr '-' '_')"
+WHEEL_NAME="${DIST_NAME}-${VERSION}-py3-none-any.whl"
+WHEEL_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${WHEEL_NAME}"
+
+info "Installing ${PACKAGE_NAME} ${VERSION}"
+
+if ! "$PYTHON" - "$WHEEL_URL" <<'PY'
+import sys
+import urllib.request
+
+request = urllib.request.Request(sys.argv[1], method="HEAD")
+try:
+    with urllib.request.urlopen(request, timeout=30):
+        pass
+except Exception as exc:  # noqa: BLE001 - any failure means "not downloadable"
+    print(f"  reason: {exc}", file=sys.stderr)
+    raise SystemExit(1) from None
+PY
+then
+  fail "No wheel for version ${VERSION} at ${WHEEL_URL}. Check https://github.com/${REPO}/releases for available versions."
+fi
+
 install_with_pipx() {
   if ! command -v pipx >/dev/null 2>&1; then
     return 1
@@ -65,15 +119,12 @@ install_with_pipx() {
 
   info "Installing with pipx"
 
-  if pipx list 2>/dev/null | grep -q "package ${PACKAGE_NAME} "; then
-    if [ "$FORCE" = "1" ]; then
-      pipx uninstall "$PACKAGE_NAME" >/dev/null 2>&1 || true
-      pipx install "$PACKAGE_SPEC"
-    else
-      pipx upgrade "$PACKAGE_NAME" || pipx install --force "$PACKAGE_SPEC"
-    fi
+  # The spec is a URL, so pipx cannot resolve an upgrade from it; a forced
+  # install is the only path that reliably replaces an existing version.
+  if [ "$FORCE" = "1" ] || pipx list 2>/dev/null | grep -q "package ${PACKAGE_NAME} "; then
+    pipx install --force "$WHEEL_URL"
   else
-    pipx install "$PACKAGE_SPEC"
+    pipx install "$WHEEL_URL"
   fi
 
   return 0
@@ -83,7 +134,12 @@ install_with_pip_user() {
   info "pipx not found. Installing with pip --user"
 
   "$PYTHON" -m pip install --user --upgrade pip >/dev/null
-  "$PYTHON" -m pip install --user --upgrade "$PACKAGE_SPEC"
+
+  if [ "$FORCE" = "1" ]; then
+    "$PYTHON" -m pip install --user --force-reinstall "$WHEEL_URL"
+  else
+    "$PYTHON" -m pip install --user --upgrade "$WHEEL_URL"
+  fi
 }
 
 if ! install_with_pipx; then
