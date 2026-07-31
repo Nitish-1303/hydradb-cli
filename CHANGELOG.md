@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The curl installer now installs from GitHub Releases instead of PyPI.** PyPI
+  publishing is paused, so `pip install hydradb-cli` still resolves 0.1.0;
+  `curl -fsSL https://cli.hydradb.com/install | bash` picks up the latest release wheel.
+  Runtime dependencies continue to resolve from PyPI. `HYDRADB_CLI_VERSION` now selects
+  a release tag, and the new `HYDRADB_CLI_REPO` overrides the source repository.
+  No change to the shipped package itself.
+
 ## 0.1.1 — 2026-07-27
 
 The CLI now talks to the HydraDB v2 API and adopts a consistent vocabulary across every

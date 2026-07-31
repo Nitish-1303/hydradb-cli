@@ -1,16 +1,20 @@
-name: Publish to PyPI
+name: Publish release artifacts
 
 on:
   release:
     types: [published]
 
+# contents: write is required to attach the built wheel and sdist to the release.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   publish:
     name: publish
     runs-on: ubuntu-latest
+    env:
+      # Job-level, because a step's own `env` block is out of scope for its `if`.
+      HAS_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +28,32 @@ jobs:
       - name: Build package
         run: python -m build
 
+      # The curl installer builds its download URL from the tag, so a tag that
+      # disagrees with pyproject.toml would publish a wheel nobody can install.
+      - name: Verify built version matches the tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          expected="${TAG#v}"
+          if [ ! -f "dist/hydradb_cli-${expected}-py3-none-any.whl" ]; then
+            echo "::error::Tag ${TAG} expects dist/hydradb_cli-${expected}-py3-none-any.whl, but build produced:"
+            ls -1 dist/
+            exit 1
+          fi
+
+      - name: Check package metadata
+        run: twine check dist/*
+
+      - name: Attach artifacts to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/* --clobber
+
+      # PyPI publishing is best-effort: the curl installer serves releases from
+      # GitHub, so a missing or expired token must not fail the release.
       - name: Publish to PyPI
+        if: env.HAS_PYPI_TOKEN == 'true'
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
