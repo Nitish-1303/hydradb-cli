@@ -328,6 +328,32 @@ class TestListInspectDeleteRelationsVerify:
         assert result.exit_code == 0
         assert "employs" in result.output
 
+    def test_relations_title_survives_a_long_source_id(self):
+        """Same Table-title trap as `database collections`.
+
+        The subject/predicate/object columns are narrow, so a Table title wrapped to the
+        table's width breaks any ordinary source ID mid-token. On a panel it stays whole.
+        """
+        _auth()
+        source_id = "cli-e2e-20260731-bridge-inspection-report"
+        w = _wrapper(
+            **{
+                "context.relations": {
+                    "relations": [
+                        {
+                            "source": {"name": "a"},
+                            "target": {"name": "b"},
+                            "relations": [{"canonical_predicate": "x"}],
+                        }
+                    ]
+                }
+            }
+        )
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["relations", source_id], env=_WIDE)
+        assert result.exit_code == 0
+        assert any(f"/// Relations: {source_id}" in line for line in _lines(result))
+
     def test_verify(self):
         _auth()
         w = _wrapper(

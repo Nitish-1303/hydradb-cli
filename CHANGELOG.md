@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-07-31
 
 ### Removed
 
@@ -22,6 +22,8 @@
 - **`database collections` no longer mangles its title** when the database name is long.
   The title moved onto a panel — the shape `database stats`/`readiness`/`monitor` already
   use — instead of a Rich table title wrapped to the table's narrow width.
+- **`relations` no longer mangles its title** either. Same cause and same fix: the
+  subject/predicate/object columns are narrow, so any ordinary source ID broke mid-token.
 
 ### Changed
 

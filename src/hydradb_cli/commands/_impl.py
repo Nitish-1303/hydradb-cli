@@ -536,7 +536,16 @@ def do_relations(
                 rows.append([src, pred, tgt])
             if not (rel.get("relations")):
                 rows.append([src, "related to", tgt])
-        return make_table("Subject", "Predicate", "Object", rows=rows, title=f"Graph relations for '{source_id}'")
+        # Title on a Panel, not on the Table: a Rich table title wraps to the
+        # table's own width, and these three columns are narrow enough that any
+        # ordinary source ID breaks mid-token. Same shape as the database
+        # subcommands and `inspect`.
+        return Panel(
+            make_table("Subject", "Predicate", "Object", rows=rows),
+            title=f"[bold cyan]/// Relations: {source_id}[/bold cyan]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
 
     print_result(result, fmt)
 
