@@ -6,6 +6,12 @@ on:
   push:
     branches: [main]
 
+# CI only reads the repository. Stating it explicitly keeps the token read-only
+# regardless of the repository default, which matters because the test job runs
+# `pip install -e`, executing code from the branch under test.
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
