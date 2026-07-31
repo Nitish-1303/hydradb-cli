@@ -536,7 +536,16 @@ def do_relations(
                 rows.append([src, pred, tgt])
             if not (rel.get("relations")):
                 rows.append([src, "related to", tgt])
-        return make_table("Subject", "Predicate", "Object", rows=rows, title=f"Graph relations for '{source_id}'")
+        # Title on a Panel, not on the Table: a Rich table title wraps to the
+        # table's own width, and these three columns are narrow enough that any
+        # ordinary source ID breaks mid-token. Same shape as the database
+        # subcommands and `inspect`.
+        return Panel(
+            make_table("Subject", "Predicate", "Object", rows=rows),
+            title=f"[bold cyan]/// Relations: {source_id}[/bold cyan]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
 
     print_result(result, fmt)
 
@@ -590,25 +599,18 @@ def do_ingestion_status(
 # ── database group ───────────────────────────────────────────────────────────
 
 
-def do_database_create(
-    database: str,
-    *,
-    embeddings: bool = False,
-    embeddings_dimension: int | None = None,
-) -> None:
+def do_database_create(database: str) -> None:
     if not database.strip():
         print_error("Database ID cannot be empty.")
-    if embeddings and embeddings_dimension is None:
-        print_error("--embeddings-dimension is required when --embeddings is set.")
 
+    # is_embeddings_tenant is deliberately not passed. The API treats it as an
+    # internal flag: it provisions a raw-embeddings collection *instead of* the
+    # knowledge and memory collections, so the resulting database cannot be used
+    # by any other command in this CLI (see CHANGELOG 'Removed').
     wrapper = get_wrapper()
     result = _execute(
         "Creating database...",
-        lambda: wrapper.databases.create(
-            database=database,
-            is_embeddings_tenant=embeddings or None,
-            embeddings_dimension=embeddings_dimension,
-        ),
+        lambda: wrapper.databases.create(database=database),
     )
     print_result(result, lambda r: f"[green]✓[/green] Database [bold]{database}[/bold] created successfully.")
 
@@ -643,7 +645,15 @@ def do_database_collections(tenant_id: str | None = None) -> None:
         ids = r.get("collections") or r.get("sub_tenant_ids") or []
         if not ids:
             return f"[dim]No collections found for database '{tid}'.[/dim]"
-        return make_table("Collection ID", rows=[[i] for i in ids], title=f"Collections for '{tid}'")
+        # Title goes on the panel, not the table: a Table title is wrapped to the
+        # table's own width, which mangles longer database names. The sibling
+        # `database` subcommands all use this panel shape.
+        return Panel(
+            make_table("Collection ID", rows=[[i] for i in ids]),
+            title=f"[bold cyan]/// Collections: {tid}[/bold cyan]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
 
     print_result(result, fmt)
 

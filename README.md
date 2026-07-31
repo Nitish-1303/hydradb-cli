@@ -56,7 +56,7 @@ This downloads the wheel for the latest [GitHub release](https://github.com/usec
 Install a specific version:
 
 ```bash
-HYDRADB_CLI_VERSION=0.1.1 curl -fsSL https://cli.hydradb.com/install | bash
+HYDRADB_CLI_VERSION=0.2.0 curl -fsSL https://cli.hydradb.com/install | bash
 ```
 
 Force reinstall:
@@ -68,7 +68,7 @@ HYDRADB_CLI_FORCE=1 curl -fsSL https://cli.hydradb.com/install | bash
 ### From a GitHub release
 
 ```bash
-pip install https://github.com/usecortex/hydradb-cli/releases/download/v0.1.1/hydradb_cli-0.1.1-py3-none-any.whl
+pip install https://github.com/usecortex/hydradb-cli/releases/download/v0.2.0/hydradb_cli-0.2.0-py3-none-any.whl
 ```
 
 > **Note:** PyPI releases are paused. `pip install hydradb-cli` still resolves the older `0.1.0`, so use
@@ -92,7 +92,7 @@ pip install -e ".[dev]"
 
 ```bash
 hydradb --version
-# hydradb-cli 0.1.1
+# hydradb-cli 0.2.0
 ```
 
 If `hydradb` is not found, make sure your virtual environment is activated or that your Python scripts directory is on your `PATH`.
@@ -305,7 +305,7 @@ Create and manage databases.
 
 | Command | What it does | Key options |
 |---------|--------------|-------------|
-| `database create <database>` | Provisions a new database | `--embeddings`, `--embeddings-dimension` |
+| `database create <database>` | Provisions a new database | — |
 | `database list` | Lists all databases for the authenticated user | — |
 | `database collections [database]` | Lists collections within a database | — |
 | `database stats [database]` | Row-count statistics | — |
