@@ -57,8 +57,11 @@ PYTHON_VERSION="$($PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.
 info "Using Python ${PYTHON_VERSION}"
 
 # Resolve the newest published release by following the /releases/latest
-# redirect, which lands on /releases/tag/vX.Y.Z. This uses no API quota.
-resolve_latest_version() {
+# redirect, which lands on /releases/tag/<tag>. This uses no API quota. The tag
+# is returned verbatim: releases are conventionally tagged `vX.Y.Z`, but an
+# unprefixed tag is a valid release too, and rebuilding the tag from the version
+# instead of using the resolved one would send us to a URL that does not exist.
+resolve_latest_tag() {
   "$PYTHON" - "$REPO" <<'PY'
 import sys
 import urllib.request
@@ -74,42 +77,61 @@ except Exception as exc:  # noqa: BLE001 - any failure means "could not resolve"
 
 tag = final.rstrip("/").rsplit("/", 1)[-1]
 if not tag or tag == "latest":
-    print(f"error: no published release found at {url}", file=sys.stderr)
+    print(f"  reason: no published release found at {url}", file=sys.stderr)
     raise SystemExit(1)
 
-print(tag[1:] if tag.startswith("v") else tag)
+print(tag)
 PY
 }
 
-if [ -z "$VERSION" ]; then
+if [ -n "$VERSION" ]; then
+  # A pinned version is not a tag, so both spellings have to be tried.
+  CANDIDATE_TAGS="v${VERSION} ${VERSION}"
+else
   info "Resolving latest release of ${REPO}"
-  VERSION="$(resolve_latest_version || true)"
-  if [ -z "$VERSION" ]; then
+  TAG="$(resolve_latest_tag || true)"
+  if [ -z "$TAG" ]; then
     fail "Could not resolve the latest release. Pin one with HYDRADB_CLI_VERSION=<x.y.z> and try again."
   fi
+  VERSION="${TAG#v}"
+  CANDIDATE_TAGS="$TAG"
 fi
 
 # setuptools normalises the distribution name in artifact filenames.
 DIST_NAME="$(printf '%s' "$PACKAGE_NAME" | tr '-' '_')"
 WHEEL_NAME="${DIST_NAME}-${VERSION}-py3-none-any.whl"
-WHEEL_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${WHEEL_NAME}"
 
 info "Installing ${PACKAGE_NAME} ${VERSION}"
 
-if ! "$PYTHON" - "$WHEEL_URL" <<'PY'
+# Quiet: a miss on the first candidate is expected, so the diagnostic is the
+# list of URLs tried, reported once below.
+asset_exists() {
+  "$PYTHON" - "$1" <<'PY' >/dev/null 2>&1
 import sys
 import urllib.request
 
 request = urllib.request.Request(sys.argv[1], method="HEAD")
-try:
-    with urllib.request.urlopen(request, timeout=30):
-        pass
-except Exception as exc:  # noqa: BLE001 - any failure means "not downloadable"
-    print(f"  reason: {exc}", file=sys.stderr)
-    raise SystemExit(1) from None
+with urllib.request.urlopen(request, timeout=30):
+    pass
 PY
-then
-  fail "No wheel for version ${VERSION} at ${WHEEL_URL}. Check https://github.com/${REPO}/releases for available versions."
+}
+
+WHEEL_URL=""
+TRIED=""
+for tag in $CANDIDATE_TAGS; do
+  candidate="https://github.com/${REPO}/releases/download/${tag}/${WHEEL_NAME}"
+  TRIED="${TRIED}
+  ${candidate}"
+  if asset_exists "$candidate"; then
+    WHEEL_URL="$candidate"
+    break
+  fi
+done
+
+if [ -z "$WHEEL_URL" ]; then
+  fail "No wheel found for version ${VERSION}. Tried:${TRIED}
+
+  Check https://github.com/${REPO}/releases for available versions."
 fi
 
 install_with_pipx() {
