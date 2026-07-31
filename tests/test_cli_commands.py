@@ -96,6 +96,27 @@ def _help_text(*argv: str) -> str:
     return re.sub(r"\s+", " ", _ANSI_RE.sub("", result.output))
 
 
+# Render at a pinned width so panel/table layout assertions do not depend on the
+# terminal the suite happens to run in.
+_WIDE = {"COLUMNS": "200", "TERM": "dumb", "NO_COLOR": "1"}
+
+
+def _lines(result) -> list[str]:
+    """Output split into colourless lines, for "this stayed on one line" assertions."""
+    return [_ANSI_RE.sub("", line) for line in result.output.splitlines()]
+
+
+def _kv_labels(result) -> list[str]:
+    """The left-hand column of a rendered key/value table (which sits inside a panel)."""
+    labels = []
+    for line in _lines(result):
+        cells = [cell.strip() for cell in line.split("│")]
+        non_empty = [cell for cell in cells if cell]
+        if len(non_empty) >= 2:
+            labels.append(non_empty[0])
+    return labels
+
+
 class TestVersionHelp:
     def test_version(self):
         result = runner.invoke(app, ["--version"])
@@ -358,6 +379,20 @@ class TestDatabase:
         assert result.exit_code == 0
         assert "c1" in result.output
 
+    def test_collections_title_is_a_panel_title_like_its_siblings(self):
+        """A Table title wraps to the *table's* width, mangling longer database names.
+
+        The title belongs on the surrounding panel, the way `stats`/`readiness`/`monitor`
+        render theirs, so it stays on one line whatever the database is called.
+        """
+        _auth()
+        db = "cli-e2e-20260731"
+        w = _wrapper(**{"databases.collections": {"collections": ["c1", "c2"]}})
+        with _patch_wrapper(w):
+            result = runner.invoke(app, ["database", "collections", db], env=_WIDE)
+        assert result.exit_code == 0
+        assert any(f"/// Collections: {db}" in line for line in _lines(result))
+
     def test_readiness(self):
         _auth()
         w = _wrapper(**{"databases.readiness": {"infra": {"ready_for_ingestion": True}}})
@@ -607,6 +642,39 @@ class TestAuthAndConfig:
         result = runner.invoke(app, ["--output", "json", "config", "show"])
         assert result.exit_code == 0
         assert "base_url" in json.loads(result.output)
+
+    def test_config_show_labels_are_canonical(self):
+        """`config show` labels the scope rows with the canonical vocabulary (CONTRACT §1).
+
+        Users set `database`/`collection`; showing them back as `tenant_id`/`sub_tenant_id`
+        gives no hint the two are the same thing.
+        """
+        assert runner.invoke(app, ["config", "set", "database", "canon-db"]).exit_code == 0
+        assert runner.invoke(app, ["config", "set", "collection", "canon-coll"]).exit_code == 0
+        result = runner.invoke(app, ["config", "show"])
+        assert result.exit_code == 0
+        labels = _kv_labels(result)
+        assert "database" in labels and "collection" in labels
+        assert "tenant_id" not in labels and "sub_tenant_id" not in labels
+        assert "canon-db" in result.output and "canon-coll" in result.output
+
+    def test_config_show_reads_legacy_file_keys(self):
+        """Config files still holding the old keys keep working, under the new labels."""
+        save_config(tenant_id="legacy-db", sub_tenant_id="legacy-coll")
+        result = runner.invoke(app, ["config", "show"])
+        assert result.exit_code == 0
+        labels = _kv_labels(result)
+        assert "database" in labels and "collection" in labels
+        assert "legacy-db" in result.output and "legacy-coll" in result.output
+
+    def test_config_show_json_keys_unchanged(self):
+        """`--output json` is a documented jq contract — only the human labels moved."""
+        assert runner.invoke(app, ["config", "set", "database", "canon-db"]).exit_code == 0
+        result = runner.invoke(app, ["--output", "json", "config", "show"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["tenant_id"] == "canon-db"
+        assert "sub_tenant_id" in data
 
 
 class TestScopeFlags:

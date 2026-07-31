@@ -643,7 +643,15 @@ def do_database_collections(tenant_id: str | None = None) -> None:
         ids = r.get("collections") or r.get("sub_tenant_ids") or []
         if not ids:
             return f"[dim]No collections found for database '{tid}'.[/dim]"
-        return make_table("Collection ID", rows=[[i] for i in ids], title=f"Collections for '{tid}'")
+        # Title goes on the panel, not the table: a Table title is wrapped to the
+        # table's own width, which mangles longer database names. The sibling
+        # `database` subcommands all use this panel shape.
+        return Panel(
+            make_table("Collection ID", rows=[[i] for i in ids]),
+            title=f"[bold cyan]/// Collections: {tid}[/bold cyan]",
+            border_style="cyan",
+            padding=(0, 1),
+        )
 
     print_result(result, fmt)
 

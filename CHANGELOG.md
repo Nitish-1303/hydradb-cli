@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`config show` now labels the scope rows `database` and `collection`** instead of
+  `tenant_id` / `sub_tenant_id`, matching the vocabulary you set them with. Config file
+  keys are unchanged and files holding the old keys keep working, as does the
+  `--output json` shape.
+- **`database collections` no longer mangles its title** when the database name is long.
+  The title moved onto a panel — the shape `database stats`/`readiness`/`monitor` already
+  use — instead of a Rich table title wrapped to the table's narrow width.
+
 ### Changed
 
 - **The curl installer now installs from GitHub Releases instead of PyPI.** PyPI

@@ -55,14 +55,17 @@ def show() -> None:
     else:
         pairs.append(("api_key", "[dim](not set)[/dim]"))
 
-    tenant_id = cfg.get("tenant_id")
-    if tenant_id:
-        pairs.append(("tenant_id", f"{tenant_id} [dim]({cfg['tenant_id_source']})[/dim]"))
+    # Labels are the canonical vocabulary (CONTRACT §1). `get_full_config` still
+    # keys the resolved scope as `tenant_id`/`sub_tenant_id` because that is the
+    # documented `--output json` shape; only the human-readable labels change.
+    database = cfg.get("tenant_id")
+    if database:
+        pairs.append(("database", f"{database} [dim]({cfg['tenant_id_source']})[/dim]"))
     else:
-        pairs.append(("tenant_id", "[dim](not set)[/dim]"))
+        pairs.append(("database", "[dim](not set)[/dim]"))
 
-    sub_tenant = cfg.get("sub_tenant_id")
-    pairs.append(("sub_tenant_id", sub_tenant or "[dim](not set)[/dim]"))
+    collection = cfg.get("sub_tenant_id")
+    pairs.append(("collection", collection or "[dim](not set)[/dim]"))
     pairs.append(("base_url", cfg["base_url"]))
     pairs.append(("config_file", cfg["config_file"]))
 
