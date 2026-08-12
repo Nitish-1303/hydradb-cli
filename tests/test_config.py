@@ -1,5 +1,7 @@
 """Tests for hydradb_cli.config module."""
 
+import os
+
 import pytest
 
 import hydradb_cli.config
@@ -77,7 +79,10 @@ class TestSaveAndReadConfig:
 
     def test_config_file_permissions(self, clean_config):
         save_config(api_key="secret")
-        assert oct(clean_config.stat().st_mode)[-3:] == "600"
+        if os.name == "nt":
+            assert clean_config.exists()
+        else:
+            assert oct(clean_config.stat().st_mode)[-3:] == "600"
 
 
 class TestEnvVarOverride:

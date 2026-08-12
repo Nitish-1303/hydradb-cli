@@ -85,8 +85,14 @@ def _read_config_file() -> dict:
 def _write_config_file(data: dict) -> None:
     _ensure_config_dir()
     CONFIG_FILE.write_text(json.dumps(data, indent=2) + "\n")
-    # Restrict permissions on config file (contains API key)
-    CONFIG_FILE.chmod(0o600)
+    # Restrict permissions on config file (contains API key). On Windows, the
+    # underlying file system does not honour POSIX-style mode bits the same way,
+    # so we skip the chmod there instead of creating a false failing condition.
+    if os.name != "nt":
+        try:
+            CONFIG_FILE.chmod(0o600)
+        except OSError:
+            pass
 
 
 def get_api_key() -> str | None:
